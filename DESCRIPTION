@@ -1,0 +1,38 @@
+Package: vegrisk
+Title: LiDAR Vegetation Encroachment and Fall-In Risk for Power Line Corridors
+Version: 0.1.0
+Authors@R:
+    person("Matt", "Jorden", , "matthew.jorden@gmail.com", role = c("aut", "cre"))
+Description: Builds a vegetation-risk screen for overhead power lines from
+    public data: USGS 3DEP airborne LiDAR (LAS/LAZ) and OpenStreetMap
+    transmission-line geometry. Clips the point cloud to a line corridor,
+    height-normalises it, trains a random-forest point classifier on local
+    geometric (eigenvalue) features with spatially blocked cross-validation,
+    and summarises grow-in and fall-in ("strike tree") risk per line segment.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.3)
+Imports:
+    data.table,
+    FNN,
+    httr2,
+    lidR (>= 4.0.0),
+    lwgeom,
+    ranger,
+    rlang,
+    sf,
+    stats,
+    terra,
+    tibble,
+    units,
+    withr
+Suggests:
+    devtools,
+    ggplot2,
+    patchwork,
+    scales,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

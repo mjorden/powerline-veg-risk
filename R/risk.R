@@ -1,0 +1,423 @@
+# Corridor vegetation-risk metrics.
+#
+# Two failure modes are screened (both standard in utility integrated
+# vegetation management):
+#
+#   grow-in  - canopy under the conductors closer than a clearance target
+#   fall-in  - a tree beside the conductors tall enough to reach one if it
+#              falls ("strike tree")
+#
+# Fall-in geometry: a tree of height h pivoting at its base sweeps a sphere
+# of radius h, so it can strike the line if the 3D distance from its base to
+# the nearest conductor point is <= h (+ growth allowance). The vertical
+# component uses the DTM at the tree and the modelled conductor elevation, so
+# terrain matters: a tree whose base sits a little below the conductor (e.g.
+# on a canyon wall above a low span) needs far less height to reach it than
+# the same tree on flat ground.
+#
+# Conductor elevation is the dominant uncertainty. Where the classifier finds
+# conductor returns it is measured; elsewhere it is bracketed (see
+# conductor_profile()) and every metric is computed under both bounds.
+
+#' Split power lines into equal-length segments
+#'
+#' @param lines `sf` lines (any CRS).
+#' @param crs Projected CRS for the output.
+#' @param seg_m Target segment length in metres. Each line is split into
+#'   `floor(length / seg_m)` equal segments, so segments are between `seg_m`
+#'   and `2 * seg_m` long.
+#' @return `sf` with `seg_id`, `line_id`, `length_m`.
+#' @export
+segment_lines <- function(lines, crs, seg_m = 50) {
+  m <- crs_m_per_unit(crs)
+  parts <- merge_lines(sf::st_transform(sf::st_geometry(lines), crs))
+  out <- lapply(seq_along(parts), function(i) {
+    len <- as.numeric(sf::st_length(parts[i])) * m
+    n <- max(1L, floor(len / seg_m))
+    br <- seq(0, 1, length.out = n + 1)
+    g <- do.call(c, lapply(seq_len(n), function(j) lwgeom::st_linesubstring(parts[i], br[j], br[j + 1])))
+    sf::st_sf(line_id = i, geometry = g)
+  })
+  out <- do.call(rbind, out)
+  out$seg_id <- seq_len(nrow(out))
+  out$length_m <- as.numeric(sf::st_length(out)) * m
+  out[, c("seg_id", "line_id", "length_m", "geometry")]
+}
+
+#' Build terrain and vegetation-only canopy height rasters
+#'
+#' The canopy height model (CHM) is built from *consensus* vegetation: points
+#' the classifier predicts as vegetation and the weak-label rules also call
+#' vegetation. Points the rules labelled wire / structure / building, and the
+#' unlabelled margins and abstained near-line candidates, are left out. The
+#' prior-corrected classifier rarely predicts the rare classes, so using its
+#' argmax alone would let conductor returns over canopy set the CHM to the
+#' conductor's height - zero clearance by construction.
+#'
+#' @param las Height-normalised `LAS` from [read_corridor()].
+#' @param pred Output of [predict_points()] (with the weak `label` column).
+#' @param res_m Raster resolution in metres.
+#' @return A list with `dtm` (ground elevation) and `chm` (canopy height),
+#'   both `SpatRaster` in metres.
+#' @export
+corridor_rasters <- function(las, pred, res_m = 1) {
+  m <- las_m_per_unit(las)
+  res <- res_m / m
+  dtm <- lidR::rasterize_terrain(lidR::unnormalize_height(las), res, lidR::tin())
+  consensus <- pred$pred == "vegetation" & pred$label %in% "vegetation"
+  veg <- las[pred$pid[consensus]]
+  chm <- lidR::rasterize_canopy(veg, res, lidR::p2r(subcircle = 0.15 / m))
+  chm <- terra::crop(terra::extend(chm, dtm), dtm)
+  # Z is assumed to share the horizontal unit (true for 3DEP UTM/NAVD88 m).
+  list(dtm = dtm * m, chm = chm * m)
+}
+
+#' Model conductor elevation along the line
+#'
+#' Conductor returns are points the wire rule labelled (`label == "wire"`) or
+#' that the classifier calls wire with probability >= `min_p_wire`. Returns
+#' within `structure_mask_m` of a support are ignored (guy wires, crossarms
+#' and insulators there are elevated and linear too). Each `bin_m` chainage
+#' bin takes a low quantile (`q`) of return elevations; bins below the lower
+#' bound (physically non-compliant, so an artefact) or implying a slope
+#' steeper than `max_slope` to both neighbours are rejected. Surviving bins
+#' are interpolated across gaps of at most `max_gap_m` (`src = "measured"`).
+#' Elsewhere the conductor is bracketed (`src = "bounded"`):
+#'
+#' * lower bound: ground + `min_ground_clear_m`. NESC Table 232-1 vertical
+#'   clearance for a 115 kV line is roughly 4.9 m over land accessible only
+#'   to pedestrians (more over roads), so a compliant line is not lower.
+#' * upper bound: with `supports`, the straight chord between the supports
+#'   either side of a station, each at ground + `attach_m`. A conductor sags
+#'   below the chord between its attachments, so it cannot be higher unless
+#'   attachments exceed `attach_m`. Where the next support lies outside the
+#'   data the upper bound is unknown and set to `Inf` (no optimistic claim).
+#'   Without `supports`, the highest chord between any two points no more
+#'   than `max_span_m` apart is used, which is only an upper bound if real
+#'   spans are no longer than that.
+#'
+#' A terrain-following model (constant height above the ground below) is
+#' wrong where a span crosses a gully; the bounds make that uncertainty
+#' explicit instead of hiding it.
+#'
+#' @param pred Output of [predict_points()].
+#' @param segments Output of [segment_lines()].
+#' @param dtm Ground elevation raster (metres), from [corridor_rasters()].
+#' @param supports Optional `sf` points of support structures.
+#' @param step_m Vertex spacing of the conductor model (metres).
+#' @param search_m Wire points farther than this from the line are ignored.
+#' @param min_p_wire Classifier probability needed for a point the rule did
+#'   not label to count as a conductor return.
+#' @param structure_mask_m Returns this close to a support are ignored.
+#' @param bin_m,min_bin_points,q Chainage bin width, minimum returns per bin,
+#'   and the quantile of return elevations used per bin.
+#' @param max_slope Maximum plausible conductor slope (rise / run) between
+#'   adjacent measured bins.
+#' @param max_gap_m Largest gap between measured bins that is interpolated.
+#' @param min_ground_clear_m,attach_m,max_span_m Bounds parameters, metres.
+#' @return data.frame of vertices: `line_id`, `x`, `y`, `s_m`, `seg_id`,
+#'   `ground`, `z_lo`, `z_hi`, `src`.
+#' @export
+conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
+                              search_m = 15, min_p_wire = 0.9, structure_mask_m = 8,
+                              bin_m = 5, min_bin_points = 3, q = 0.25, max_slope = 0.2,
+                              max_gap_m = 30, min_ground_clear_m = 4.9, attach_m = 20,
+                              max_span_m = 500) {
+  crs <- sf::st_crs(segments)
+  m <- crs_m_per_unit(crs)
+  v <- line_vertex_table(segments, crs, step_m)
+  v$seg_id <- segments$seg_id[sf::st_nearest_feature(
+    sf::st_as_sf(v[, c("x", "y")], coords = c("x", "y"), crs = crs), segments)]
+  v$ground <- terra::extract(dtm, as.matrix(v[, c("x", "y")]))[, 1]
+  v <- v[!is.na(v$ground), ]
+
+  v$z_lo <- v$ground + min_ground_clear_m
+  v$z_hi <- NA_real_
+  sup <- NULL
+  if (!is.null(supports) && nrow(supports) > 0) {
+    sxy <- sf::st_coordinates(sf::st_transform(sf::st_geometry(supports), crs))[, 1:2, drop = FALSE]
+    sp <- line_project(sxy, v, m)
+    sup <- data.frame(line_id = sp$line_id, s_m = sp$s_m,
+                      z = terra::extract(dtm, sxy)[, 1] + attach_m, xy = sxy)
+    sup <- sup[sp$dist_m <= search_m & !is.na(sup$z), ]
+  }
+  for (lid in unique(v$line_id)) {
+    i <- which(v$line_id == lid)
+    v$z_hi[i] <- if (is.null(sup)) {
+      taut_upper(v$s_m[i], v$ground[i] + attach_m, max_span_m, step = 5)
+    } else {
+      support_chord(v$s_m[i], sup[sup$line_id == lid, ])
+    }
+  }
+  v$z_hi <- pmax(v$z_hi, v$z_lo)
+  v$src <- "bounded"
+
+  rule <- if (!is.null(pred$label)) pred$label %in% "wire" else FALSE
+  confident <- if (!is.null(pred$p_wire)) pred$pred %in% "wire" & pred$p_wire >= min_p_wire else FALSE
+  w <- pred[which(rule | confident)]
+  if (nrow(w) > 0 && !is.null(sup) && nrow(sup) > 0) {
+    d_sup <- FNN::get.knnx(as.matrix(sup[, c("xy.X", "xy.Y")]), as.matrix(w[, c("X", "Y")]), k = 1)$nn.dist[, 1] * m
+    w <- w[d_sup > structure_mask_m]
+  }
+  if (nrow(w) > 0) {
+    xy <- as.matrix(w[, c("X", "Y")])
+    pr <- line_project(xy, v, m)
+    obs <- data.frame(line_id = pr$line_id, s_m = pr$s_m,
+                      z = terra::extract(dtm, xy)[, 1] + w$height_m)[pr$dist_m <= search_m, ]
+    obs <- obs[!is.na(obs$z), ]
+    if (nrow(obs) > 0) {
+      obs$bin <- floor(obs$s_m / bin_m)
+      bins <- stats::aggregate(z ~ line_id + bin, obs, function(z) {
+        c(q = stats::quantile(z, q, names = FALSE), n = length(z))
+      })
+      bins <- data.frame(line_id = bins$line_id, s_m = (bins$bin + 0.5) * bin_m,
+                         z = bins$z[, "q"], n = bins$z[, "n"])
+      bins <- bins[bins$n >= min_bin_points, ]
+      for (lid in unique(bins$line_id)) {
+        i <- which(v$line_id == lid)
+        b <- bins[bins$line_id == lid, ]
+        floor_z <- stats::approx(v$s_m[i], v$z_lo[i], xout = b$s_m, rule = 2)$y
+        b <- plausible_bins(b[b$z >= floor_z, ], max_slope)
+        if (nrow(b) == 0) next
+        zz <- interp_with_gaps(b, v$s_m[i], bin_m, max_gap_m)
+        ok <- !is.na(zz)
+        v$z_lo[i[ok]] <- zz[ok]
+        v$z_hi[i[ok]] <- zz[ok]
+        v$src[i[ok]] <- "measured"
+      }
+    }
+  }
+  v
+}
+
+# Chord between the supports either side of each station; Inf where a side
+# has no support inside the data.
+support_chord <- function(s, sup) {
+  if (nrow(sup) == 0) return(rep(Inf, length(s)))
+  sup <- sup[order(sup$s_m), ]
+  k <- findInterval(s, sup$s_m)
+  out <- rep(Inf, length(s))
+  ok <- k >= 1 & k < nrow(sup)
+  a <- k[ok]
+  t <- (s[ok] - sup$s_m[a]) / (sup$s_m[a + 1] - sup$s_m[a])
+  out[ok] <- sup$z[a] + t * (sup$z[a + 1] - sup$z[a])
+  at <- match(s, sup$s_m)
+  out[!is.na(at)] <- sup$z[at[!is.na(at)]]
+  out
+}
+
+# Keep measured bins with at least one neighbour within `max_slope` (drops
+# isolated bins and spikes or ramps a conductor cannot make).
+plausible_bins <- function(b, max_slope) {
+  b <- b[order(b$s_m), ]
+  if (nrow(b) < 2) return(b[0, ])
+  sl <- abs(diff(b$z) / diff(b$s_m))
+  left <- c(Inf, sl)
+  right <- c(sl, Inf)
+  b[pmin(left, right) <= max_slope, ]
+}
+
+# Linear interpolation of binned elevations onto stations, NA outside the
+# observed range and across gaps longer than `max_gap`.
+interp_with_gaps <- function(b, s, bin_m, max_gap) {
+  b <- b[order(b$s_m), ]
+  if (nrow(b) == 1) return(ifelse(abs(s - b$s_m) <= bin_m / 2, b$z, NA_real_))
+  zz <- stats::approx(b$s_m, b$z, xout = s, rule = 1)$y
+  k <- findInterval(s, b$s_m, rightmost.closed = TRUE)
+  inside <- k >= 1 & k < nrow(b)
+  gap <- rep(Inf, length(s))
+  gap[inside] <- b$s_m[k[inside] + 1] - b$s_m[k[inside]]
+  zz[gap > max_gap] <- NA_real_
+  zz
+}
+
+# Highest chord value at each station over all chords spanning it whose
+# endpoints are at most `max_span` apart. Computed on a `step`-metre
+# resample of the profile, then interpolated back.
+taut_upper <- function(s, z, max_span, step = 5) {
+  ss <- seq(min(s), max(s), by = step)
+  if (length(ss) < 2) return(z)
+  zz <- stats::approx(s, z, xout = ss)$y
+  up <- vapply(seq_along(ss), function(k) {
+    a <- which(ss >= ss[k] - max_span & ss <= ss[k])
+    b <- which(ss >= ss[k] & ss <= ss[k] + max_span)
+    sa <- matrix(ss[a], length(a), length(b))
+    sb <- matrix(ss[b], length(a), length(b), byrow = TRUE)
+    za <- matrix(zz[a], length(a), length(b))
+    zb <- matrix(zz[b], length(a), length(b), byrow = TRUE)
+    span <- sb - sa
+    val <- ifelse(span > 0, za + (zb - za) * (ss[k] - sa) / span, za)
+    max(val[span <= max_span])
+  }, numeric(1))
+  stats::approx(ss, up, xout = s, rule = 2)$y
+}
+
+#' Locate trees and score grow-in / fall-in risk per segment
+#'
+#' Every metric is computed against both conductor bounds from
+#' [conductor_profile()] (identical where the conductor is measured).
+#'
+#' @param rasters Output of [corridor_rasters()].
+#' @param profile Output of [conductor_profile()].
+#' @param segments Output of [segment_lines()].
+#' @param tree_ws_m Local-maximum window for treetop detection (metres).
+#' @param min_tree_m Minimum treetop height.
+#' @param phase_offset_m Horizontal offset of the outer conductors from the
+#'   mapped centreline (OSM maps the right-of-way centreline, not each phase).
+#' @param growth_m Growth allowance added to tree heights (e.g. expected growth
+#'   over a trim cycle).
+#' @param under_line_m Horizontal distance from the centreline within which
+#'   canopy counts as "under the conductors". Canopy there is scored as
+#'   grow-in; treetops there are excluded from the fall-in count so the two
+#'   are not double-counted.
+#' @param wire_zone_m Half-width of the wire zone for canopy cover.
+#' @param clearance_target_m Target vertical clearance between canopy and the
+#'   lowest conductor. The default 4.6 m (15 ft) is a common utility
+#'   clearance-at-time-of-work target; it is not the NERC FAC-003 minimum
+#'   vegetation clearance distance, which is smaller.
+#' @param cover_min_m Canopy height counted as cover.
+#' @param structures Optional `sf` points of support structures (e.g. OSM
+#'   pole/tower nodes and the line's own vertices, which OSM mappers place at
+#'   structures). Canopy within `structure_mask_m` is zeroed so poles,
+#'   H-frames and crossarms are not scored as trees under the line.
+#' @param structure_mask_m Mask radius around each structure (metres); should
+#'   cover the structure's across-line width. Masked cells are treated as
+#'   unobserved (excluded from cover and clearance), and trees there are not
+#'   scored.
+#' @param min_support A CHM cell counts as canopy only if at least this many
+#'   cells of its 3 x 3 window are >= `cover_min_m`. Removes 1-2 cell features
+#'   (unmapped single poles, stray conductor returns classified as vegetation)
+#'   that would otherwise appear as trees directly under the line. It also
+#'   trims crown edges slightly.
+#' @param min_encroach_m2 Canopy area inside the clearance envelope needed to
+#'   call a segment grow-in (guards against single-cell artefacts).
+#' @return A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
+#'   treetops). Columns ending `_lo` / `_hi` use the lower / upper conductor
+#'   bound. `priority` is the tier under the optimistic (upper) bound, i.e.
+#'   what holds even if the conductor is as high as plausible; `priority_lo`
+#'   is the pessimistic tier, which saturates wherever canopy stands under a
+#'   bounded span (the lower bound is only ~5 m above ground). `confidence` is
+#'   `"measured"` (conductor observed over at least half the segment),
+#'   `"robust"` (same tier under both bounds) or `"bound-dependent"`.
+#'   `encroach_*_m2` is the canopy area under the conductors inside the
+#'   clearance envelope. Rows are ordered by what holds even under the
+#'   optimistic (upper) conductor bound - encroachment, then strike trees -
+#'   then by the same metrics under the lower bound.
+#' @export
+assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 3,
+                        phase_offset_m = 3, growth_m = 0, under_line_m = 6,
+                        wire_zone_m = 10, clearance_target_m = 4.6, cover_min_m = 2,
+                        min_support = 6, structures = NULL, structure_mask_m = 8,
+                        min_encroach_m2 = 5) {
+  crs <- sf::st_crs(segments)
+  m <- crs_m_per_unit(crs)
+  dtm <- rasters$dtm
+  chm <- terra::ifel(is.na(rasters$chm), 0, rasters$chm)
+  if (!is.null(structures) && nrow(structures) > 0) {
+    mask <- sf::st_union(sf::st_buffer(sf::st_transform(sf::st_geometry(structures), crs),
+                                       structure_mask_m / m))
+    # NA, not 0: masked cells are unobserved, not bare ground.
+    chm <- terra::mask(chm, terra::vect(mask), inverse = TRUE, updatevalue = NA)
+  }
+  support <- terra::focal(chm >= cover_min_m, w = 3, fun = "sum", na.rm = TRUE)
+  chm <- terra::ifel(support >= min_support, chm, 0)
+
+  near <- function(xy) {
+    p <- line_project(xy, profile, m)
+    list(dh = p$dist_m, seg_id = profile$seg_id[p$vertex],
+         z_lo = profile$z_lo[p$vertex], z_hi = profile$z_hi[p$vertex])
+  }
+
+  # --- canopy cells: cover and grow-in clearance ---------------------------
+  cells <- terra::as.data.frame(c(chm, dtm), xy = TRUE, na.rm = FALSE)
+  names(cells) <- c("x", "y", "h", "ground")
+  cells <- cells[!is.na(cells$ground) & !is.na(cells$h), ]
+  nc <- near(as.matrix(cells[, c("x", "y")]))
+  cells$dh <- nc$dh
+  cells$seg_id <- nc$seg_id
+  top <- cells$ground + cells$h
+  cells$clear_lo <- nc$z_lo - top
+  cells$clear_hi <- nc$z_hi - top
+
+  # --- treetops: fall-in ----------------------------------------------------
+  trees <- empty_trees(crs)
+  tt <- lidR::locate_trees(terra::ifel(chm < min_tree_m, NA, chm),
+                           lidR::lmf(ws = tree_ws_m / m, hmin = min_tree_m))
+  if (nrow(tt) > 0) {
+    xy <- sf::st_coordinates(tt)[, 1:2, drop = FALSE]
+    ground <- terra::extract(dtm, xy)[, 1]
+    nt <- near(xy)
+    reach <- function(zc) sqrt(pmax(nt$dh - phase_offset_m, 0)^2 + (zc - ground)^2)
+    h <- tt$Z + growth_m
+    beside <- nt$dh > under_line_m
+    trees <- sf::st_sf(
+      seg_id = nt$seg_id, height_m = tt$Z, dh_m = nt$dh,
+      reach_lo_m = reach(nt$z_lo), reach_hi_m = reach(nt$z_hi),
+      geometry = sf::st_geometry(tt)
+    )
+    trees$strike_lo <- beside & h >= trees$reach_lo_m
+    trees$strike_hi <- beside & h >= trees$reach_hi_m
+    trees$strike <- trees$strike_lo | trees$strike_hi
+    trees <- trees[!is.na(ground), ]
+  }
+
+  # --- per-segment summary --------------------------------------------------
+  frac_measured <- tapply(profile$src == "measured", profile$seg_id, mean)
+  cell_area <- prod(terra::res(chm)) * m^2
+  seg_stats <- lapply(segments$seg_id, function(s) {
+    cs <- cells[cells$seg_id == s, ]
+    wz <- cs[cs$dh <= wire_zone_m, ]
+    ul <- cs[cs$dh <= under_line_m & cs$h >= cover_min_m, ]
+    ts <- trees[trees$seg_id == s, ]
+    fm <- frac_measured[as.character(s)]
+    data.frame(
+      seg_id             = s,
+      frac_measured      = if (is.na(fm)) 0 else unname(fm),
+      wire_zone_cover    = if (nrow(wz)) mean(wz$h >= cover_min_m) else NA_real_,
+      wire_zone_max_h_m  = if (nrow(wz)) max(wz$h) else NA_real_,
+      min_clearance_lo_m = if (nrow(ul)) min(ul$clear_lo) else NA_real_,
+      min_clearance_hi_m = if (nrow(ul)) min(ul$clear_hi) else NA_real_,
+      encroach_lo_m2     = sum(ul$clear_lo < clearance_target_m) * cell_area,
+      encroach_hi_m2     = sum(ul$clear_hi < clearance_target_m) * cell_area,
+      n_strike_lo        = sum(ts$strike_lo),
+      n_strike_hi        = sum(ts$strike_hi)
+    )
+  })
+  out <- merge(segments, do.call(rbind, seg_stats), by = "seg_id")
+  tier <- function(area, n) {
+    ifelse(area >= min_encroach_m2, "grow-in", ifelse(n > 0, "fall-in", "none"))
+  }
+  lv <- c("grow-in", "fall-in", "none")
+  p_lo <- tier(out$encroach_lo_m2, out$n_strike_lo)
+  p_hi <- tier(out$encroach_hi_m2, out$n_strike_hi)
+  out$priority <- factor(p_hi, levels = lv)
+  out$priority_lo <- factor(p_lo, levels = lv)
+  out$confidence <- factor(
+    ifelse(out$frac_measured >= 0.5, "measured", ifelse(p_lo == p_hi, "robust", "bound-dependent")),
+    levels = c("measured", "robust", "bound-dependent")
+  )
+  out <- out[order(-out$encroach_hi_m2, -out$n_strike_hi, -out$encroach_lo_m2,
+                   -out$n_strike_lo), ]
+  list(segments = out, trees = trees)
+}
+
+empty_trees <- function(crs) {
+  sf::st_sf(seg_id = integer(), height_m = numeric(), dh_m = numeric(),
+            reach_lo_m = numeric(), reach_hi_m = numeric(),
+            strike_lo = logical(), strike_hi = logical(), strike = logical(),
+            geometry = sf::st_sfc(crs = crs))
+}
+
+#' Line vertices as candidate structure locations
+#'
+#' OSM power-line ways are normally drawn with a node at each support
+#' structure, tagged or not.
+#'
+#' @param lines `sf` lines.
+#' @return `sf` POINT layer of the lines' vertices.
+#' @export
+line_vertex_points <- function(lines) {
+  xy <- sf::st_coordinates(sf::st_geometry(lines))
+  sf::st_as_sf(as.data.frame(unique(xy[, 1:2, drop = FALSE])), coords = c("X", "Y"),
+               crs = sf::st_crs(lines))
+}
