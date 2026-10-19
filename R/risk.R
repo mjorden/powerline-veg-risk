@@ -54,22 +54,97 @@ segment_lines <- function(lines, crs, seg_m = 50) {
 #' argmax alone would let conductor returns over canopy set the CHM to the
 #' conductor's height - zero clearance by construction.
 #'
+#' Conductor returns that cross over canopy are not "suspended" (there is
+#' canopy below them), so the rules can label them vegetation. When a
+#' conductor `profile` is supplied, points are excluded as conductor returns
+#' only if they are (a) within `envelope_m` of the centreline where the
+#' conductor is measured, (b) at or above the measured conductor elevation
+#' minus `below_m`, and (c) wire-like: either locally linear
+#' (`linearity_k10 >= min_linearity`) or locally suspended - no return of
+#' any kind in the `gap_m` layer just beneath the conductor band (measured
+#' conductor elevation minus `below_m`) within its 3 x 3 m neighbourhood
+#' (bundled conductors form ribbons, not lines, so linearity alone misses
+#' them). A tree crown that reaches wire height has foliage below it and
+#' stays in the canopy model, as does canopy within `gap_m` of a conductor
+#' (which the clearance target flags anyway). Cells that held excluded points and no remaining canopy are
+#' returned as `unobserved` (not bare ground). Keep `envelope_m` no wider
+#' than the grow-in zone used in [assess_risk()], or tall side trees could
+#' lose their tops before the fall-in test.
+#'
 #' @param las Height-normalised `LAS` from [read_corridor()].
-#' @param pred Output of [predict_points()] (with the weak `label` column).
+#' @param pred Output of [predict_points()] (with the weak `label` column and
+#'   the `linearity_k10` feature).
 #' @param res_m Raster resolution in metres.
+#' @param profile Optional output of [conductor_profile()].
+#' @param envelope_m Half-width of the conductor envelope (metres).
+#' @param below_m Depth below the measured conductor still treated as
+#'   conductor returns (sag between bins, bundle spacing).
+#' @param min_linearity Linearity needed for an envelope point to count as a
+#'   conductor return.
+#' @param gap_m Empty space beneath a candidate cluster for it to count as
+#'   suspended.
+#' @param drop Optional logical vector over `pred` rows of points to keep out
+#'   of the canopy model (e.g. vendor-classified buildings).
 #' @return A list with `dtm` (ground elevation) and `chm` (canopy height),
-#'   both `SpatRaster` in metres.
+#'   both `SpatRaster` in metres, `unobserved` (logical `SpatRaster` or
+#'   `NULL`), and `n_conductor_excluded`.
 #' @export
-corridor_rasters <- function(las, pred, res_m = 1) {
+corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 15,
+                             below_m = 1, min_linearity = 0.6, gap_m = 1.5, drop = NULL) {
   m <- las_m_per_unit(las)
   res <- res_m / m
   dtm <- lidR::rasterize_terrain(lidR::unnormalize_height(las), res, lidR::tin())
   consensus <- pred$pred == "vegetation" & pred$label %in% "vegetation"
+  if (!is.null(drop)) consensus <- consensus & !drop
+  hit_rows <- integer()
+  if (!is.null(profile) && any(profile$src == "measured")) {
+    cand <- which(consensus)
+    pr <- line_project(as.matrix(pred[cand, c("X", "Y")]), profile, m)
+    zabs <- las$Zref[pred$pid[cand]] * m
+    meas <- profile$src[pr$vertex] == "measured"
+    near <- meas & pr$dist_m <= envelope_m & zabs >= profile$z_lo[pr$vertex] - below_m
+    linear <- if (!is.null(pred$linearity_k10)) pred$linearity_k10[cand] >= min_linearity else FALSE
+    # Local air gap beneath the conductor band: a candidate cell is
+    # suspended if no return of any kind lies in the `gap_m` layer just below
+    # the band (conductor - below_m) anywhere in its 3 x 3 neighbourhood.
+    # Bundle sub-conductors sit inside the band, so they do not fill the gap;
+    # a crown reaching wire height does.
+    cs <- 1 / m
+    band <- profile$z_lo[pr$vertex] - below_m
+    allp <- data.table::data.table(cx = floor(pred$X / cs), cy = floor(pred$Y / cs),
+                                   z = las$Zref[pred$pid] * m)
+    cc <- data.table::data.table(cx = floor(pred$X[cand][near] / cs),
+                                 cy = floor(pred$Y[cand][near] / cs), zb = band[near])
+    cc <- cc[, .(zb = min(zb)), by = .(cx, cy)]
+    win <- data.table::rbindlist(lapply(-1:1, function(i) lapply(-1:1, function(j) {
+      cc[, .(cx, cy, nx = cx + i, ny = cy + j, zb)]
+    })) |> unlist(recursive = FALSE))
+    hits <- allp[win, on = c(cx = "nx", cy = "ny"), allow.cartesian = TRUE, nomatch = NULL,
+                 .(ocx = i.cx, ocy = i.cy, z = x.z, zb = i.zb)]
+    filled <- unique(hits[z < zb & z >= zb - gap_m, .(ocx, ocy)])
+    cc[, gap := Inf]
+    cc[filled, gap := 0, on = c(cx = "ocx", cy = "ocy")]
+    ck <- paste(floor(pred$X[cand][near] / cs), floor(pred$Y[cand][near] / cs))
+    gap <- stats::setNames(cc$gap, paste(cc$cx, cc$cy))
+    suspended <- rep(FALSE, length(cand))
+    suspended[near] <- gap[ck] >= gap_m
+    hit <- near & (linear | suspended)
+    hit_rows <- cand[hit]
+    consensus[hit_rows] <- FALSE
+  }
   veg <- las[pred$pid[consensus]]
   chm <- lidR::rasterize_canopy(veg, res, lidR::p2r(subcircle = 0.15 / m))
   chm <- terra::crop(terra::extend(chm, dtm), dtm)
-  # Z is assumed to share the horizontal unit (true for 3DEP UTM/NAVD88 m).
-  list(dtm = dtm * m, chm = chm * m)
+  unobserved <- NULL
+  if (length(hit_rows)) {
+    cells <- terra::cellFromXY(dtm, as.matrix(pred[hit_rows, c("X", "Y")]))
+    unobserved <- terra::setValues(dtm, FALSE)
+    unobserved[unique(stats::na.omit(cells))] <- TRUE
+    unobserved <- unobserved & is.na(chm)
+  }
+  # Z is assumed to share the horizontal unit (true for both case studies).
+  list(dtm = dtm * m, chm = chm * m, unobserved = unobserved,
+       n_conductor_excluded = length(hit_rows))
 }
 
 #' Model conductor elevation along the line
@@ -313,6 +388,7 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   m <- crs_m_per_unit(crs)
   dtm <- rasters$dtm
   chm <- terra::ifel(is.na(rasters$chm), 0, rasters$chm)
+  if (!is.null(rasters$unobserved)) chm <- terra::mask(chm, rasters$unobserved, maskvalues = TRUE)
   if (!is.null(structures) && nrow(structures) > 0) {
     mask <- sf::st_union(sf::st_buffer(sf::st_transform(sf::st_geometry(structures), crs),
                                        structure_mask_m / m))

@@ -4,13 +4,16 @@
 \alias{plot_profile}
 \title{Ground and conductor profile along the line}
 \usage{
-plot_profile(profile, risk = NULL, file = NULL)
+plot_profile(profile, risk = NULL, attach_m = NA, file = NULL)
 }
 \arguments{
 \item{profile}{Output of \code{\link[=conductor_profile]{conductor_profile()}}.}
 
 \item{risk}{Output of \code{\link[=assess_risk]{assess_risk()}}, optional; strike trees are drawn at
 their base elevation.}
+
+\item{attach_m}{Attachment height used for the upper bound (for the
+subtitle).}
 
 \item{file}{Output PNG path, or \code{NULL}.}
 }

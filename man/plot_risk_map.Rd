@@ -9,6 +9,7 @@ plot_risk_map(
   risk,
   structures = NULL,
   title = "Vegetation risk along the line",
+  source = "USGS 3DEP LiDAR",
   file = NULL
 )
 }
@@ -20,6 +21,8 @@ plot_risk_map(
 \item{structures}{OSM structures (\code{sf}), optional.}
 
 \item{title}{Plot title.}
+
+\item{source}{Data credit shown in the subtitle.}
 
 \item{file}{Output PNG path, or \code{NULL} to return the plot.}
 }

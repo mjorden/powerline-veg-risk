@@ -32,6 +32,7 @@ reference:
       - train_point_classifier
       - cv_point_classifier
       - classify_probs
+      - evaluate_vendor_classes
       - predict_points
   - title: Conductor model and risk
     contents:

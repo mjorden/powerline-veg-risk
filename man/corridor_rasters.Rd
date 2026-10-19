@@ -4,18 +4,46 @@
 \alias{corridor_rasters}
 \title{Build terrain and vegetation-only canopy height rasters}
 \usage{
-corridor_rasters(las, pred, res_m = 1)
+corridor_rasters(
+  las,
+  pred,
+  res_m = 1,
+  profile = NULL,
+  envelope_m = 15,
+  below_m = 1,
+  min_linearity = 0.6,
+  gap_m = 1.5,
+  drop = NULL
+)
 }
 \arguments{
 \item{las}{Height-normalised \code{LAS} from \code{\link[=read_corridor]{read_corridor()}}.}
 
-\item{pred}{Output of \code{\link[=predict_points]{predict_points()}} (with the weak \code{label} column).}
+\item{pred}{Output of \code{\link[=predict_points]{predict_points()}} (with the weak \code{label} column and
+the \code{linearity_k10} feature).}
 
 \item{res_m}{Raster resolution in metres.}
+
+\item{profile}{Optional output of \code{\link[=conductor_profile]{conductor_profile()}}.}
+
+\item{envelope_m}{Half-width of the conductor envelope (metres).}
+
+\item{below_m}{Depth below the measured conductor still treated as
+conductor returns (sag between bins, bundle spacing).}
+
+\item{min_linearity}{Linearity needed for an envelope point to count as a
+conductor return.}
+
+\item{gap_m}{Empty space beneath a candidate cluster for it to count as
+suspended.}
+
+\item{drop}{Optional logical vector over \code{pred} rows of points to keep out
+of the canopy model (e.g. vendor-classified buildings).}
 }
 \value{
 A list with \code{dtm} (ground elevation) and \code{chm} (canopy height),
-both \code{SpatRaster} in metres.
+both \code{SpatRaster} in metres, \code{unobserved} (logical \code{SpatRaster} or
+\code{NULL}), and \code{n_conductor_excluded}.
 }
 \description{
 The canopy height model (CHM) is built from \emph{consensus} vegetation: points
@@ -25,4 +53,22 @@ unlabelled margins and abstained near-line candidates, are left out. The
 prior-corrected classifier rarely predicts the rare classes, so using its
 argmax alone would let conductor returns over canopy set the CHM to the
 conductor's height - zero clearance by construction.
+}
+\details{
+Conductor returns that cross over canopy are not "suspended" (there is
+canopy below them), so the rules can label them vegetation. When a
+conductor \code{profile} is supplied, points are excluded as conductor returns
+only if they are (a) within \code{envelope_m} of the centreline where the
+conductor is measured, (b) at or above the measured conductor elevation
+minus \code{below_m}, and (c) wire-like: either locally linear
+(\code{linearity_k10 >= min_linearity}) or locally suspended - no return of
+any kind in the \code{gap_m} layer just beneath the conductor band (measured
+conductor elevation minus \code{below_m}) within its 3 x 3 m neighbourhood
+(bundled conductors form ribbons, not lines, so linearity alone misses
+them). A tree crown that reaches wire height has foliage below it and
+stays in the canopy model, as does canopy within \code{gap_m} of a conductor
+(which the clearance target flags anyway). Cells that held excluded points and no remaining canopy are
+returned as \code{unobserved} (not bare ground). Keep \code{envelope_m} no wider
+than the grow-in zone used in \code{\link[=assess_risk]{assess_risk()}}, or tall side trees could
+lose their tops before the fall-in test.
 }

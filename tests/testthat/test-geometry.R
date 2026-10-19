@@ -60,3 +60,26 @@ test_that("avg_precision does not reward tied scores by row order", {
   expect_lt(avg_precision(score, pos), 0.001)
   expect_equal(avg_precision(score, rev(pos)), avg_precision(score, pos))
 })
+
+test_that("evaluate_vendor_classes maps ASPRS codes and ignores unclassified", {
+  lab <- factor(c("vegetation", "vegetation", "building", "wire", "vegetation"), levels = label_levels)
+  vc <- c(5L, 3L, 6L, 1L, 6L)
+  ev <- evaluate_vendor_classes(lab, vc)
+  v <- ev$metrics[ev$metrics$class == "vegetation", ]
+  b <- ev$metrics[ev$metrics$class == "building", ]
+  expect_equal(v$recall, 1)
+  expect_equal(v$precision, 2 / 3)
+  expect_equal(b$recall, 0.5)
+  expect_equal(sum(ev$confusion), 4) # the unclassified (1) point is excluded
+  expect_equal(v$balanced_accuracy, 0.75)
+})
+
+test_that("evaluate_vendor_classes exposes the majority-class baseline", {
+  vc <- c(rep(5L, 98), 6L, 6L)
+  ev <- evaluate_vendor_classes(factor(rep("vegetation", 100), levels = label_levels), vc)
+  b <- ev$metrics[ev$metrics$class == "building", ]
+  expect_equal(b$precision, 0)          # never predicted -> 0, not NA
+  expect_equal(ev$metrics$kappa[1], 0)  # no skill
+  expect_equal(ev$metrics, ev$baseline)
+  expect_gt(ev$metrics$f1[1], 0.98)     # high vegetation F1 despite no skill
+})

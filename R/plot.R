@@ -25,10 +25,12 @@ theme_vegrisk <- function(base_size = 10) {
 #' @param risk Output of [assess_risk()].
 #' @param structures OSM structures (`sf`), optional.
 #' @param title Plot title.
+#' @param source Data credit shown in the subtitle.
 #' @param file Output PNG path, or `NULL` to return the plot.
 #' @export
 plot_risk_map <- function(rasters, risk, structures = NULL,
-                          title = "Vegetation risk along the line", file = NULL) {
+                          title = "Vegetation risk along the line",
+                          source = "USGS 3DEP LiDAR", file = NULL) {
   rlang::check_installed(c("ggplot2", "scales"))
   chm <- terra::as.data.frame(rasters$chm, xy = TRUE, na.rm = TRUE)
   names(chm)[3] <- "h"
@@ -54,19 +56,24 @@ plot_risk_map <- function(rasters, risk, structures = NULL,
                                 name = "Strike trees") +
     ggplot2::labs(title = title,
                   subtitle = sprintf(paste("Potential strike trees: %d if the conductor is at code minimum, %d at the optimistic bound",
-                                           "\n%.0f m segments | USGS 3DEP 2020 LiDAR | OSM line geometry"),
+                                           "\n%.0f m segments | %s | OSM line geometry"),
                                      sum(risk$trees$strike_lo), sum(risk$trees$strike_hi),
-                                     stats::median(seg$length_m)),
+                                     stats::median(seg$length_m), source),
                   x = NULL, y = NULL) +
     ggplot2::coord_sf(crs = crs, datum = crs, expand = FALSE) +
+    ggplot2::scale_x_continuous(n.breaks = 3) +
     theme_vegrisk() +
     ggplot2::theme(axis.text = ggplot2::element_text(size = 7), legend.box = "vertical")
+  # Tall (north-south) corridors: legend to the side so the map keeps its width.
+  bb <- sf::st_bbox(seg)
+  tall <- (bb[["ymax"]] - bb[["ymin"]]) > 2 * (bb[["xmax"]] - bb[["xmin"]])
+  if (tall) p <- p + ggplot2::theme(legend.position = "right", legend.justification = "top")
   if (!is.null(structures) && nrow(structures) > 0) {
     st <- sf::st_transform(structures, crs)
     st <- st[lengths(sf::st_intersects(st, sf::st_as_sfc(sf::st_bbox(seg)))) > 0, ]
     p <- p + ggplot2::geom_sf(data = st, shape = 3, size = 1.6)
   }
-  save_or_return(p, file, 8, 9)
+  save_or_return(p, file, if (tall) 9 else 8, if (tall) 10 else 9)
 }
 
 #' Ground and conductor profile along the line
@@ -74,9 +81,11 @@ plot_risk_map <- function(rasters, risk, structures = NULL,
 #' @param profile Output of [conductor_profile()].
 #' @param risk Output of [assess_risk()], optional; strike trees are drawn at
 #'   their base elevation.
+#' @param attach_m Attachment height used for the upper bound (for the
+#'   subtitle).
 #' @param file Output PNG path, or `NULL`.
 #' @export
-plot_profile <- function(profile, risk = NULL, file = NULL) {
+plot_profile <- function(profile, risk = NULL, attach_m = NA, file = NULL) {
   rlang::check_installed("ggplot2")
   pr <- profile[profile$line_id == profile$line_id[1], ]
   unknown <- is.infinite(pr$z_hi)
@@ -90,8 +99,10 @@ plot_profile <- function(profile, risk = NULL, file = NULL) {
     ggplot2::geom_point(data = meas, ggplot2::aes(y = z_lo), colour = "#d62728", size = 0.8) +
     ggplot2::annotate("text", x = max(pr$s_m), y = pr$ground[nrow(pr)], label = "ground",
                       hjust = 1.05, vjust = 1.6, size = 3, colour = "grey35") +
-    ggplot2::labs(title = "Where the conductor could be: public data leave a band tens of metres wide",
-                  subtitle = paste0("Band: ground + NESC clearance (thin line) up to the chord between supports at ground + 20 m.\n",
+    ggplot2::labs(title = sprintf("Conductor elevation: measured along %.0f%% of the line, bounded elsewhere",
+                                  100 * mean(pr$src == "measured")),
+                  subtitle = paste0("Band: ground + NESC clearance (thin line) up to the chord between supports",
+                                    if (!is.na(attach_m)) sprintf(" at ground + %g m", attach_m) else "", ".\n",
                                     "No band = next support outside the data. Dots = measured conductor returns."),
                   x = "Distance along line (m)", y = "Elevation (m, NAVD88)") +
     theme_vegrisk()

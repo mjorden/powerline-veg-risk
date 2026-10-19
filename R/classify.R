@@ -88,6 +88,7 @@ classify_probs <- function(model, feat) {
 #'
 #' @param feat Labelled features with `fold` (from [assign_blocks()]).
 #' @param eval_veg_frac Fraction of held-out vegetation points scored.
+#' @param random Also run random k-fold CV for comparison.
 #' @inheritParams train_point_classifier
 #' @return A list with `metrics` (per-class precision / recall / F1 and
 #'   balanced accuracy for each scheme), `confusion` (spatial-CV confusion
@@ -95,7 +96,8 @@ classify_probs <- function(model, feat) {
 #'   prediction) and `fold_counts` (labelled points per spatial fold).
 #' @export
 cv_point_classifier <- function(feat, n_per_class = 20000, num_trees = 200, mtry = NULL,
-                                drop_features = NULL, eval_veg_frac = 0.1, seed = 1) {
+                                drop_features = NULL, eval_veg_frac = 0.1, random = TRUE,
+                                seed = 1) {
   lab <- feat[!is.na(label)]
   run <- function(fold_col) {
     preds <- vector("list", max(lab[[fold_col]]))
@@ -123,9 +125,10 @@ cv_point_classifier <- function(feat, n_per_class = 20000, num_trees = 200, mtry
 
   withr::with_seed(seed, lab[, random_fold := sample(rep_len(seq_len(max(fold)), .N))])
   spatial <- run("fold")
-  random <- run("random_fold")
+  metrics <- class_metrics(spatial, "spatial_block")
+  if (random) metrics <- rbind(metrics, class_metrics(run("random_fold"), "random"))
   list(
-    metrics = rbind(class_metrics(spatial, "spatial_block"), class_metrics(random, "random")),
+    metrics = metrics,
     confusion = round(stats::xtabs(w ~ truth + pred, spatial)),
     fold_counts = table(fold = lab$fold, label = droplevels(lab$label))
   )
@@ -179,4 +182,53 @@ avg_precision <- function(score, positive, w = rep(1, length(score))) {
   tot <- tapply(w, g, sum)
   prec <- cumsum(tp) / cumsum(tot)
   sum(tp * prec) / sum(tp)
+}
+
+#' Score labels against vendor-delivered ASPRS classes
+#'
+#' Some 3DEP deliveries classify vegetation (ASPRS 3-5) and buildings (6).
+#' Those vendor classes are independent of this package's weak labels, so
+#' they provide a ground-truth check for the classes they cover. Only points
+#' whose vendor class is in `map` are scored; vendor "unclassified" points
+#' are excluded. Vegetation usually dominates (prevalence near 1), so its F1
+#' cannot show skill: an always-"vegetation" baseline is reported alongside,
+#' with balanced accuracy and Cohen's kappa over the mapped classes. A class
+#' that is never predicted has precision 0, not NA.
+#'
+#' @param labels Factor of labels to score (e.g. `pred$pred` or `feat$label`).
+#' @param vendor_class Integer ASPRS class of the same points.
+#' @param map Named list mapping package labels to vendor class codes.
+#' @return A list with `metrics` (per-class precision, recall, F1, n, plus
+#'   `balanced_accuracy` and `kappa`), `baseline` (the same for predicting
+#'   the majority class everywhere) and `confusion`.
+#' @export
+evaluate_vendor_classes <- function(labels, vendor_class,
+                                    map = list(vegetation = 3:5, building = 6L)) {
+  truth <- rep(NA_character_, length(vendor_class))
+  for (nm in names(map)) truth[vendor_class %in% map[[nm]]] <- nm
+  keep <- !is.na(truth)
+  lab <- as.character(labels[keep])
+  lab[is.na(lab)] <- "(unlabelled)"
+  truth <- truth[keep]
+  score <- function(pred) {
+    out <- do.call(rbind, lapply(names(map), function(cl) {
+      tp <- sum(truth == cl & pred == cl)
+      np <- sum(pred == cl)
+      nt <- sum(truth == cl)
+      prec <- if (np > 0) tp / np else 0
+      rec <- tp / nt
+      data.frame(class = cl, n = nt, prevalence = nt / length(truth), predicted = np,
+                 precision = prec, recall = rec,
+                 f1 = if (prec + rec > 0) 2 * prec * rec / (prec + rec) else 0)
+    }))
+    # Cohen's kappa over the mapped classes, other predictions counting as wrong
+    po <- mean(pred == truth)
+    pe <- sum(vapply(names(map), function(cl) mean(truth == cl) * mean(pred == cl), 0))
+    out$balanced_accuracy <- mean(out$recall)
+    out$kappa <- (po - pe) / (1 - pe)
+    out
+  }
+  majority <- names(which.max(table(truth)))
+  list(metrics = score(lab), baseline = score(rep(majority, length(truth))),
+       confusion = table(vendor = truth, label = lab))
 }

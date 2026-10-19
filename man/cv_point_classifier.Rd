@@ -11,6 +11,7 @@ cv_point_classifier(
   mtry = NULL,
   drop_features = NULL,
   eval_veg_frac = 0.1,
+  random = TRUE,
   seed = 1
 )
 }
@@ -24,6 +25,8 @@ cv_point_classifier(
 \item{drop_features}{Feature columns to exclude (for ablation).}
 
 \item{eval_veg_frac}{Fraction of held-out vegetation points scored.}
+
+\item{random}{Also run random k-fold CV for comparison.}
 
 \item{seed}{RNG seed.}
 }

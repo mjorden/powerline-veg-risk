@@ -8,6 +8,15 @@
 \description{
 Builds a vegetation-risk screen for overhead power lines from public data: USGS 3DEP airborne LiDAR (LAS/LAZ) and OpenStreetMap transmission-line geometry. Clips the point cloud to a line corridor, height-normalises it, trains a random-forest point classifier on local geometric (eigenvalue) features with spatially blocked cross-validation, and summarises grow-in and fall-in ("strike tree") risk per line segment.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://mjorden.github.io/powerline-veg-risk/}
+  \item \url{https://github.com/mjorden/powerline-veg-risk}
+  \item Report bugs at \url{https://github.com/mjorden/powerline-veg-risk/issues}
+}
+
+}
 \author{
 \strong{Maintainer}: Matt Jorden \email{matthew.jorden@gmail.com}
 

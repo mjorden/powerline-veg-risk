@@ -1,0 +1,8 @@
+{
+"type": "FeatureCollection",
+"name": "osm_lines_context",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "osm_id": "1381464850", "name": "Sunshine to Boulder Hydro", "voltage_kv": 115.0, "operator": "Public Service Company of Colorado" }, "geometry": { "type": "LineString", "coordinates": [ [ -105.3097037, 40.0251266 ], [ -105.3105039, 40.0251895 ], [ -105.3140395, 40.0253488 ], [ -105.31664, 40.0240334 ], [ -105.3172582, 40.023716 ], [ -105.3210111, 40.0215473 ], [ -105.3239871, 40.0198614 ], [ -105.3261508, 40.0159837 ], [ -105.3281332, 40.0124593 ], [ -105.3293274, 40.0103321 ], [ -105.3305331, 40.0081929 ], [ -105.3318956, 40.0057852 ], [ -105.3322135, 40.0053207 ], [ -105.3323542, 40.0051462 ] ] } }
+]
+}

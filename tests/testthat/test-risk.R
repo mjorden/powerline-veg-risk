@@ -148,3 +148,53 @@ test_that("conductor returns beside a support are ignored", {
   prof_nomask <- conductor_profile(guy, s, r$dtm, supports = sup, structure_mask_m = 0)
   expect_false(any(prof_nomask$src == "measured")) # below the 4.9 m floor or too steep
 })
+
+test_that("conductor returns crossing canopy are kept out of the canopy model", {
+  set.seed(4)
+  g <- expand.grid(X = x0 + seq(0, 60, 0.5), Y = y0 + seq(-20, 20, 0.5))
+  ground <- data.frame(g, Z = 0, Classification = 2L)
+  tree <- data.frame(X = x0 + 30 + runif(400, -2, 2), Y = y0 + runif(400, -2, 2),
+                     Z = runif(400, 2, 8), Classification = 1L)
+  wire <- data.frame(X = x0 + seq(0, 60, 0.25), Y = y0, Z = 12, Classification = 1L)
+  # A second crown, beside the line, that reaches wire height: not linear.
+  tall <- data.frame(X = x0 + 15 + runif(400, -2, 2), Y = y0 + 3 + runif(400, -2, 2),
+                     Z = runif(400, 2, 13), Classification = 1L)
+  pts <- rbind(ground, tree, wire, tall)
+  pts$ReturnNumber <- 1L
+  pts$NumberOfReturns <- 1L
+  pts$Intensity <- 100L
+  las <- lidR::LAS(data.table::as.data.table(pts), crs = sf::st_crs(utm))
+  las <- lidR::normalize_height(las, lidR::tin())
+  ag <- which(las$Classification != 2L)
+  pred <- data.table::data.table(pid = ag, X = las$X[ag], Y = las$Y[ag], height_m = las$Z[ag],
+                                 pred = factor("vegetation", levels = label_levels),
+                                 label = factor("vegetation", levels = label_levels))
+  is_wire_pt <- abs(pred$Y - y0) < 1e-6 & abs(pred$height_m - 12) < 1e-6
+  pred[, linearity_k10 := ifelse(is_wire_pt, 0.95, 0.2)]
+  ln <- sf::st_sf(geometry = sf::st_sfc(sf::st_linestring(rbind(c(x0, y0), c(x0 + 60, y0))), crs = utm))
+  s <- segment_lines(ln, utm, seg_m = 30)
+  prof <- line_vertex_table(s, utm)
+  prof$seg_id <- 1L
+  prof$ground <- 0
+  prof$z_lo <- prof$z_hi <- 12
+  prof$src <- "measured"
+
+  naive <- corridor_rasters(las, pred)
+  clean <- corridor_rasters(las, pred, profile = prof, envelope_m = 5)
+  at_tree <- cbind(x0 + 30.25, y0 + 0.25)
+  expect_gt(terra::extract(naive$chm, at_tree)[, 1], 11)   # wire sets the CHM
+  expect_lt(terra::extract(clean$chm, at_tree)[, 1], 8.5)  # tree height restored
+  expect_equal(clean$n_conductor_excluded, nrow(wire))
+  # the tall, non-linear crown keeps its top
+  expect_gt(max(terra::extract(clean$chm, cbind(x0 + 15 + c(-1, 0, 1), y0 + 3))[, 1], na.rm = TRUE), 11)
+  # cells holding only conductor returns are unobserved, not bare ground
+  far <- cbind(x0 + 50.1, y0 + c(-0.1, 0.1))  # wire lies on a cell boundary
+  expect_true(any(terra::extract(clean$unobserved, far)[, 1] == 1))
+
+  # A bundled conductor is ribbon-like (low linearity): the air gap above
+  # the 8 m tree still identifies it, and the tall crown is still kept.
+  pred[, linearity_k10 := 0.2]
+  ribbon <- corridor_rasters(las, pred, profile = prof, envelope_m = 5)
+  expect_lt(terra::extract(ribbon$chm, at_tree)[, 1], 8.5)
+  expect_gt(max(terra::extract(ribbon$chm, cbind(x0 + 15 + c(-1, 0, 1), y0 + 3))[, 1], na.rm = TRUE), 11)
+})
