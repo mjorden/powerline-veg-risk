@@ -224,6 +224,38 @@ run_case_study <- function(cfg) {
   }
   print(st_drop_geometry(risk$segments)[1:min(8, nrow(risk$segments)), ], digits = 3)
 
+  # --- 6b. Landsat canopy greenness / moisture (optional) ----------------------
+  # cfg$landsat = list(years, months, dry_index): a dry-season median composite
+  # over the corridor, read only where LiDAR says canopy has grown in.
+  dryness <- NULL
+  if (!is.null(cfg$landsat)) {
+    lc <- cfg$landsat
+    comp_path <- file.path(out, "landsat_composite.tif")
+    scenes_path <- file.path(out, "landsat_scenes.csv")
+    if (file.exists(comp_path) && file.exists(scenes_path)) {
+      comp <- terra::rast(comp_path)
+      used <- fread(scenes_path)
+      attr(comp, "scenes") <- used$id
+      attr(comp, "dates") <- as.Date(used$datetime)
+    } else {
+      corridor_area <- st_buffer(study, cfg$half_width_m / m)
+      scenes <- landsat_scenes(corridor_area, years = lc$years, months = lc$months)
+      comp <- landsat_composite(scenes, corridor_area)
+      terra::writeRaster(comp, comp_path, overwrite = TRUE)
+      fwrite(scenes[scenes$id %in% attr(comp, "scenes"), c("id", "datetime", "platform", "cloud_cover")],
+             scenes_path)
+    }
+    dryness <- canopy_dryness(comp, rasters, profile, risk, zone_m = cfg$under_line_m,
+                              corridor_m = cfg$half_width_m,
+                              dry_index = if (is.null(lc$dry_index)) "ndvi" else lc$dry_index)
+    step(sprintf("Landsat: %d dry-season scenes; %d canopy pixels in the corridor",
+                 length(attr(comp, "scenes")), attr(dryness$segments, "landsat")$n_ref_px))
+    print(table(grow_in = dryness$segments$priority == "grow-in",
+                dry_canopy = dryness$segments$dry_canopy, useNA = "ifany"))
+    risk$segments <- dryness$segments
+    plot_canopy_dryness(dryness, file = fig("canopy_dryness"))
+  }
+
   st_write(risk$segments, file.path(out, "segments.gpkg"), delete_dsn = TRUE, quiet = TRUE)
   st_write(risk$trees, file.path(out, "trees.gpkg"), delete_dsn = TRUE, quiet = TRUE)
   fwrite(st_drop_geometry(risk$segments), file.path(out, "segments.csv"))
@@ -237,7 +269,12 @@ run_case_study <- function(cfg) {
                   priority = table(risk$segments$priority),
                   priority_by_confidence = table(risk$segments$priority, risk$segments$confidence),
                   n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi)),
-                  n_conductor_excluded = rasters$n_conductor_excluded)
+                  n_conductor_excluded = rasters$n_conductor_excluded,
+                  landsat = if (!is.null(dryness)) attr(dryness$segments, "landsat"),
+                  dry_grow_in = if (!is.null(dryness)) {
+                    c(hi = sum(dryness$segments$dry_grow_in, na.rm = TRUE),
+                      lo = sum(dryness$segments$dry_grow_in_lo, na.rm = TRUE))
+                  })
   saveRDS(summary, file.path(out, "summary.rds"))
 
   # --- 7. Figures -------------------------------------------------------------

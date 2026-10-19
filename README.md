@@ -65,7 +65,8 @@ OSM lines (Overpass) ─┘                │
 | Weak labels | `weak_labels()` | [R/labels.R](R/labels.R) |
 | Classifier and validation | `train_point_classifier()`, `cv_point_classifier()`, `classify_probs()`, `predict_points()`, `evaluate_vendor_classes()` | [R/classify.R](R/classify.R) |
 | Conductor model and risk | `conductor_profile()`, `corridor_rasters()`, `assess_risk()` | [R/risk.R](R/risk.R) |
-| Figures | `plot_risk_map()`, `plot_profile()`, `plot_cross_section()`, `plot_cv()`, `plot_importance()` | [R/plot.R](R/plot.R) |
+| Dry-season canopy greenness and moisture (optional) | `landsat_scenes()`, `landsat_composite()`, `canopy_dryness()` | [R/landsat.R](R/landsat.R) |
+| Figures | `plot_risk_map()`, `plot_profile()`, `plot_cross_section()`, `plot_cv()`, `plot_importance()`, `plot_canopy_dryness()` | [R/plot.R](R/plot.R) |
 | Case studies | `run_case_study(cfg)` + one config script per site | [analysis/](analysis/) |
 
 ## Design decisions worth reading
@@ -103,6 +104,13 @@ A crown that reaches wire height has foliage beneath it and stays, so it is stil
 
 **Structures are masked.** Towers, H-frames and crossarms otherwise look like tall trees under the conductors. Cells within a structure-sized radius of OSM structure nodes and line vertices (for every circuit in the corridor) are treated as unobserved, and features one or two cells wide are removed with a 3×3 crown-support filter.
 
+**LiDAR says where canopy has grown in; Landsat says how green and wet it is.** The grow-in screen ranks canopy by its distance to the conductor, not by how readily it would carry fire to the line. An optional Landsat step adds that:
+
+- **Data:** Landsat 8/9 Collection 2 Level-2 surface reflectance, from the Microsoft Planetary Computer STAC API (no key needed). Only the corridor window of each cloud-optimised GeoTIFF is read.
+- **Composite:** a per-pixel median over every clear dry-season observation in the chosen years. `QA_PIXEL` masks fill, cloud, dilated cloud, cirrus, shadow, snow and water. Water is masked because its negative NDVI would read as very dry canopy. Two indices come out: **NDVI** (greenness) and **NDMI** (NIR against SWIR1: canopy water content, the closer of the two to fuel moisture).
+- **LiDAR picks the pixels.** A 30 m pixel is wider than many rights-of-way, so most pixels mix trees with cleared ground. Each pixel gets a canopy fraction from the 1 m CHM, and pixels under 50% canopy are not scored. A segment's value is the mean of its pixels, weighted by how many of the segment's canopy cells *inside the grow-in zone* fall in each one. It describes the trees under the wires, not the forest beside them.
+- **Relative, not absolute.** Neither index has a fire-danger threshold. Each segment is ranked against every canopy pixel in the corridor, and `dry_canopy` marks the lowest quarter. `dry_grow_in` is dry *and* grown in under the optimistic conductor bound; `dry_grow_in_lo` uses the pessimistic tier.
+
 ## Case study 1: Sunshine Canyon, Colorado
 
 ![Sunshine conductor profile](man/figures/sunshine_conductor_profile.png)
@@ -126,6 +134,19 @@ A crown that reaches wire height has foliage beneath it and stays, so it is stil
 With only a few hundred metres of labelled conductor and five structures, wires and structures don't generalise across space here. Random folds would have hidden that.
 
 ![Sunshine cross-section](man/figures/sunshine_cross_section.png)
+
+**The grown-in canopy is not the dry canopy.** A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, gives 141 canopy-dominated 30 m pixels in the corridor. 23 of the 30 segments have enough grown-in canopy to rank; NDVI and NDMI agree closely across them (r = 0.89).
+
+| robust grow-in candidate | NDVI percentile | NDMI percentile |
+|---|---:|---:|
+| 0.10–0.15 km, trees to 20 m | 0.36 | 0.49 |
+| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 0.50 | 0.81 |
+| 1.06–1.11 km, canyon floor, trees to 29 m | 0.89 | 0.96 |
+
+- **None of the 3 robust grow-in candidates is dry.** The two worst encroachments are among the wettest canopy on the line: riparian trees on the canyon floor.
+- **The 5 driest segments** (lowest NDVI quarter; 0.05–0.10, 0.46–0.51, 0.81–0.86 and 1.32–1.42 km) are all bound-dependent: grow-in only if the conductor is at the code minimum. If the conductor turns out to be low there, encroachment and dry fuel coincide, so these come first among the 27 undecidable segments.
+
+![Sunshine canopy dryness](man/figures/sunshine_canopy_dryness.png)
 
 ## Case study 2: West Nashville, Tennessee
 
@@ -182,6 +203,7 @@ Wires transfer across space here: average precision 0.88 against a no-skill 0.10
 - **The structure mask** hides canopy close to each support, so strike trees right beside structures are not scored.
 - **Treetops from a CHM** (local maxima, 5 m window) merge or split crowns in dense stands.
 - **Vertical units** are assumed to match horizontal units (true for both deliveries: metres/metres and US survey feet/US survey feet).
+- **Landsat greenness is not fuel moisture.** Low NDVI over canopy can also mean thin, trimmed or leaf-off crowns, and a 30 m pixel always mixes the right-of-way with its edges. `dry_canopy` ranks segments within one corridor and one composite. It can't be compared across sites or seasons, and it is not a fire-danger rating.
 
 ## Reproduce
 
@@ -197,9 +219,10 @@ Rscript analysis/run_nashville.R         # ~0.3 GB; uses the Colorado model for 
 Rscript -e 'devtools::test()'           # unit tests: synthetic geometry + lidR example data, no network
 ```
 
-Cross-validation is the slow part (minutes on mains power, much longer on battery). Set `VEGRISK_REUSE=1` to reuse a site's saved model and validation results and recompute only labels and risk. The OSM layers used are cached in `data-raw/<site>/*.geojson`, so reruns are reproducible even if OSM changes. Outputs go to `output/<site>/`: `segments.gpkg`, `trees.gpkg`, `segments.csv`, `conductor_profile.csv`, `cv_metrics.csv`, `summary.rds`.
+Cross-validation is the slow part (minutes on mains power, much longer on battery). Set `VEGRISK_REUSE=1` to reuse a site's saved model and validation results and recompute only labels and risk. The OSM layers used are cached in `data-raw/<site>/*.geojson`, so reruns are reproducible even if OSM changes. Outputs go to `output/<site>/`: `segments.gpkg`, `trees.gpkg`, `segments.csv`, `conductor_profile.csv`, `cv_metrics.csv`, `summary.rds`. A site config with `landsat = list(years, months)` also writes `landsat_composite.tif` and `landsat_scenes.csv`; the composite is cached and reused on reruns.
 
 ## Data
 
 - **LiDAR:** U.S. Geological Survey 3D Elevation Program, public domain: `CO_DRCOG_2020_B20` tiles `w0472n4429`, `w0472n4430`; `TN_DavidsonCounty_D22` tiles `155020`, `155060`, `155100`, `155140`, `169020`.
 - **Power lines, structures, buildings:** © OpenStreetMap contributors, ODbL.
+- **Landsat:** U.S. Geological Survey Landsat 8–9 Collection 2 Level-2 surface reflectance, public domain, accessed through the Microsoft Planetary Computer.

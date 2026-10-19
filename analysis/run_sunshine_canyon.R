@@ -25,5 +25,7 @@ run_case_study(list(
   min_ground_clear_m = 4.9,            # NESC 232-1, 115 kV, pedestrian-only land
   attach_m = 20,                       # upper limit on wood H-frame attachment height
   section_m = 100,                     # cross-section where phases cross trees
-  vendor_classes = FALSE               # delivery has no vegetation/building classes
+  vendor_classes = FALSE,              # delivery has no vegetation/building classes
+  # Dry-season Landsat 8/9 composite bracketing the 2020 LiDAR flight.
+  landsat = list(years = 2019:2021, months = 7:9, dry_index = "ndvi")
 ))

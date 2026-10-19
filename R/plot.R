@@ -222,6 +222,67 @@ plot_importance <- function(model, file = NULL, n = 12) {
   save_or_return(p, file, 6, 3.5)
 }
 
+#' Map of dry-season canopy greenness and dry grown-in segments
+#'
+#' Landsat pixels are drawn at their 30 m footprint, coloured by the index
+#' that drives `dry_canopy`; pixels below the canopy-fraction cut-off (mostly
+#' cleared right-of-way) are grey. Segments are coloured by the combined
+#' screen.
+#'
+#' @param dryness Output of [canopy_dryness()].
+#' @param title Plot title; `NULL` states how many grown-in segments have
+#'   dry canopy.
+#' @param file Output PNG path, or `NULL`.
+#' @export
+plot_canopy_dryness <- function(dryness, title = NULL, file = NULL) {
+  rlang::check_installed(c("ggplot2", "scales"))
+  seg <- dryness$segments
+  info <- attr(seg, "landsat")
+  key <- info$dry_index
+  crs <- sf::st_crs(seg)
+  px <- cbind(sf::st_coordinates(dryness$pixels), sf::st_drop_geometry(dryness$pixels))
+  px$value <- px[[key]]
+  w <- 30 / crs_m_per_unit(crs)
+  lv <- c("dry and grown in", "dry canopy", "grown in", "neither", "no canopy pixels")
+  seg$screen <- factor(ifelse(is.na(seg$dry_canopy), lv[5],
+                       ifelse(seg$dry_grow_in, lv[1], ifelse(seg$dry_canopy, lv[2],
+                       ifelse(seg$priority == "grow-in", lv[3], lv[4])))), levels = lv)
+  dates <- range(info$dates)
+  if (is.null(title)) {
+    title <- sprintf("%d of %d grown-in segments have canopy among the corridor's driest %.0f%%",
+                     sum(seg$dry_grow_in, na.rm = TRUE), sum(seg$priority == "grow-in"),
+                     100 * info$dry_quantile)
+  }
+
+  p <- ggplot2::ggplot() +
+    ggplot2::geom_tile(data = px[!px$scored, ], ggplot2::aes(X, Y), width = w, height = w,
+                       fill = "grey90", colour = "white", linewidth = 0.1) +
+    ggplot2::geom_tile(data = px[px$scored, ], ggplot2::aes(X, Y, fill = value), width = w, height = w,
+                       colour = "white", linewidth = 0.1) +
+    ggplot2::scale_fill_distiller(palette = "BrBG", direction = 1, name = toupper(key)) +
+    ggplot2::geom_sf(data = seg, ggplot2::aes(colour = screen), linewidth = 1.3) +
+    ggplot2::scale_colour_manual(values = c(`dry and grown in` = "#b2182b", `dry canopy` = "#ef8a62",
+                                            `grown in` = "#4d4d4d", neither = "#bababa",
+                                            `no canopy pixels` = "#e0e0e0"),
+                                 drop = FALSE, name = NULL) +
+    ggplot2::labs(title = title,
+                  subtitle = sprintf(paste("Dry-season median of %d Landsat scenes, %s to %s.",
+                                           "\nDry = segment in the lowest %.0f%% of the corridor's canopy pixels by %s.",
+                                           "\nGrown in = optimistic-bound grow-in tier from LiDAR.",
+                                           "Grey pixels: < %.0f%% canopy, not scored."),
+                                     length(info$scenes), format(dates[1], "%b %Y"), format(dates[2], "%b %Y"),
+                                     100 * info$dry_quantile, toupper(key), 100 * info$min_canopy_frac),
+                  x = NULL, y = NULL) +
+    ggplot2::coord_sf(crs = crs, datum = crs, expand = FALSE) +
+    ggplot2::scale_x_continuous(n.breaks = 3) +
+    theme_vegrisk() +
+    ggplot2::theme(axis.text = ggplot2::element_text(size = 7), legend.box = "vertical")
+  bb <- sf::st_bbox(seg)
+  tall <- (bb[["ymax"]] - bb[["ymin"]]) > 2 * (bb[["xmax"]] - bb[["xmin"]])
+  if (tall) p <- p + ggplot2::theme(legend.position = "right", legend.justification = "top")
+  save_or_return(p, file, if (tall) 9 else 8, if (tall) 10 else 9)
+}
+
 save_or_return <- function(p, file, w, h) {
   if (is.null(file)) return(p)
   ggplot2::ggsave(file, p, width = w, height = h, dpi = 150, bg = "white")

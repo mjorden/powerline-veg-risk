@@ -41,6 +41,11 @@ reference:
       - corridor_rasters
       - conductor_profile
       - assess_risk
+  - title: Canopy greenness and moisture (Landsat)
+    contents:
+      - landsat_scenes
+      - landsat_composite
+      - canopy_dryness
   - title: Figures
     contents:
       - starts_with("plot_")
