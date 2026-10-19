@@ -8,6 +8,16 @@ geometric (eigenvalue) features with spatially blocked cross-validation,
 and summarises grow-in and fall-in ("strike tree") risk per line
 segment.
 
+## See also
+
+Useful links:
+
+- <https://mjorden.github.io/powerline-veg-risk/>
+
+- <https://github.com/mjorden/powerline-veg-risk>
+
+- Report bugs at <https://github.com/mjorden/powerline-veg-risk/issues>
+
 ## Author
 
 **Maintainer**: Matt Jorden <matthew.jorden@gmail.com>

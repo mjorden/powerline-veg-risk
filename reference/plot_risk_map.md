@@ -14,6 +14,7 @@ plot_risk_map(
   risk,
   structures = NULL,
   title = "Vegetation risk along the line",
+  source = "USGS 3DEP LiDAR",
   file = NULL
 )
 ```
@@ -37,6 +38,10 @@ plot_risk_map(
 - title:
 
   Plot title.
+
+- source:
+
+  Data credit shown in the subtitle.
 
 - file:
 

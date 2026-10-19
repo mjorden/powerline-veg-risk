@@ -50,38 +50,109 @@
 </h1></div>
 <!-- badges: start -->
 
-<p><strong>Screening a transmission corridor for vegetation risk from public airborne LiDAR, in R.</strong></p>
-<p><code>vegrisk</code> is a small R package plus a reproducible case study. It takes USGS 3DEP point clouds (LAS/LAZ) and OpenStreetMap power-line geometry and produces a segment-by-segment screen for the two vegetation failure modes utilities manage:</p>
+<p><strong>Screening transmission corridors for vegetation risk from public airborne LiDAR, in R.</strong></p>
+<p><code>vegrisk</code> is an R package plus two reproducible case studies. It takes USGS 3DEP point clouds (LAS/LAZ) and OpenStreetMap power-line geometry and produces a segment-by-segment screen for the two vegetation failure modes utilities manage:</p>
 <ul>
 <li>
 <strong>Grow-in:</strong> canopy growing up into the clearance envelope beneath the conductors.</li>
 <li>
 <strong>Fall-in:</strong> “strike trees” beside the line that are tall enough to reach a conductor if they fall.</li>
 </ul>
-<p>The case study is the <strong>Sunshine–Boulder Hydro 115 kV line</strong> in Sunshine Canyon, Boulder County, Colorado. It’s wildland–urban interface: the 2010 Fourmile Canyon Fire burned about 2.5 km to the north-west. Inputs are 1.46 km of line, about 2.2 M above-ground LiDAR points (USGS <code>CO_DRCOG_2020</code>, ~35 pts/m²), 5 tagged OSM structures, and 33 OSM buildings.</p>
+<table class="table">
+<colgroup>
+<col width="33%">
+<col width="33%">
+<col width="33%">
+</colgroup>
+<thead><tr>
+<th></th>
+<th>Sunshine Canyon, CO</th>
+<th>West Nashville, TN</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>Line</td>
+<td>Sunshine–Boulder Hydro 115 kV, wood H-frames</td>
+<td>TVA Maury–Davidson 500 kV, lattice towers, shared right-of-way</td>
+</tr>
+<tr>
+<td>Setting</td>
+<td>Wildland–urban interface (2010 Fourmile Canyon Fire burned ~2.5 km away)</td>
+<td>Wooded hills, managed right-of-way</td>
+</tr>
+<tr>
+<td>LiDAR</td>
+<td>
+<code>CO_DRCOG_2020</code>, UTM metres, ~35 pts/m²</td>
+<td>
+<code>TN_DavidsonCounty_D22</code>, Tennessee State Plane <strong>US survey feet</strong>, ~34 pts/m²</td>
+</tr>
+<tr>
+<td>Delivered classes</td>
+<td>ground / unclassified / noise only</td>
+<td>+ vegetation (3–5) and buildings (6)</td>
+</tr>
+<tr>
+<td>Line length, above-ground points</td>
+<td>1.52 km, 2.26 M</td>
+<td>2.0 km, 1.05 M</td>
+</tr>
+<tr>
+<td>Conductor returns found</td>
+<td>914</td>
+<td>104,650</td>
+</tr>
+<tr>
+<td>Conductor elevation measured along</td>
+<td>2% of the line</td>
+<td>
+<strong>~100%</strong> of the line</td>
+</tr>
+<tr>
+<td>Result</td>
+<td>Bounded: 3 robust grow-in candidates, 27 segments undecidable</td>
+<td>Decisive: no grow-in, 24 strike trees in 7 segments, 32 clear</td>
+</tr>
+</tbody>
+</table>
+<div class="section level2">
+<h2 id="headline-findings">Headline findings<a class="anchor" aria-label="anchor" href="#headline-findings"></a>
+</h2>
+<ol style="list-style-type: decimal">
+<li>
+<strong>No public 3DEP project from 2019 on labels power lines.</strong> I sampled the classification of all 641 USGS 3DEP projects from 2019 onward in the public Entwine index. None uses the ASPRS wire classes; the few hits for codes 13/14 were topobathy datasets or state-specific reuse (NC Phase 4 uses 13 for roads). Conductor labels have to be derived.</li>
+<li>
+<strong>Whether public LiDAR can decide grow-in depends on whether it sampled the conductors.</strong> In Colorado it barely did, so the conductor is bounded within a band tens of metres tall and 27 of 30 segments stay undecidable. In Nashville, the 500 kV bundles were sampled along almost the whole line, so the same pipeline gives a measured, decisive screen.</li>
+<li>
+<strong>Vendor vegetation classes contain the conductors.</strong> In Nashville, 99.3% of conductor returns (103,918 points, 15–45 m up) are delivered as <em>high vegetation</em>. A canopy model built straight from the delivered classes flags <strong>every one</strong> of the 39 segments as grow-in; with conductor returns removed, none are.</li>
+<li>
+<strong>Random cross-validation on point clouds misleads.</strong> Random folds report a Colorado wire average precision of 0.22; 100 m spatial blocks report 0.004. A model trained in Colorado doesn’t transfer to Nashville (wire recall 0).</li>
+</ol>
 <div class="float">
-<img src="reference/figures/risk_map.png" alt="Risk map"><div class="figcaption">Risk map</div>
+<img src="reference/figures/nashville_risk_map.png" alt="Nashville risk map"><div class="figcaption">Nashville risk map</div>
+</div>
 </div>
 <div class="section level2">
 <h2 id="pipeline">Pipeline<a class="anchor" aria-label="anchor" href="#pipeline"></a>
 </h2>
 <pre><code>3DEP tiles (TNM API) ─┐
-                      ├─ clip to 45 m corridor ─ height-normalise (TIN on class 2)
-OSM line (Overpass) ──┘                │
+                      ├─ clip to corridor ─ height-normalise (TIN on class 2)
+OSM lines (Overpass) ─┘                │
                                        ▼
           per-point features: multi-scale eigenvalue shape (k = 10, 30),
           echo structure, intensity percentile, height
                                        │
-          weak labels from GIS + geometry (no labelled classes in 3DEP)
+          weak labels from GIS + geometry (3DEP has no wire classes)
                                        │
           random forest (ranger), class-weighted, prior-corrected;
-          spatially blocked CV vs random CV; feature ablation
-                                       │
-          vegetation-only canopy height model ─ treetops (local maxima)
+          spatially blocked CV vs random CV; feature ablation;
+          vendor-class ground truth where it exists
                                        │
           conductor elevation: measured where seen, bounded elsewhere
                                        │
-          per 50 m segment: clearance encroachment + strike trees
+          canopy model from consensus vegetation, conductor returns removed
+                                       │
+          per 50 m segment: clearance encroachment + 3D strike trees
           under both conductor bounds, with a confidence label</code></pre>
 <table class="table">
 <colgroup>
@@ -122,7 +193,7 @@ OSM line (Overpass) ──┘                │
 <tr>
 <td>Classifier and validation</td>
 <td>
-<code><a href="reference/train_point_classifier.html">train_point_classifier()</a></code>, <code><a href="reference/cv_point_classifier.html">cv_point_classifier()</a></code>, <code><a href="reference/classify_probs.html">classify_probs()</a></code>, <code><a href="reference/predict_points.html">predict_points()</a></code>
+<code><a href="reference/train_point_classifier.html">train_point_classifier()</a></code>, <code><a href="reference/cv_point_classifier.html">cv_point_classifier()</a></code>, <code><a href="reference/classify_probs.html">classify_probs()</a></code>, <code><a href="reference/predict_points.html">predict_points()</a></code>, <code><a href="reference/evaluate_vendor_classes.html">evaluate_vendor_classes()</a></code>
 </td>
 <td><a href="R/classify.R">R/classify.R</a></td>
 </tr>
@@ -140,116 +211,57 @@ OSM line (Overpass) ──┘                │
 </td>
 <td><a href="R/plot.R">R/plot.R</a></td>
 </tr>
+<tr>
+<td>Case studies</td>
+<td>
+<code>run_case_study(cfg)</code> + one config script per site</td>
+<td><a href="analysis/">analysis/</a></td>
+</tr>
 </tbody>
 </table>
 </div>
 <div class="section level2">
 <h2 id="design-decisions-worth-reading">Design decisions worth reading<a class="anchor" aria-label="anchor" href="#design-decisions-worth-reading"></a>
 </h2>
-<p><strong>Distances are always metres.</strong> Point clouds stay in their native CRS, and every parameter is converted with <code><a href="reference/las_m_per_unit.html">las_m_per_unit()</a></code>. Without that, a US-survey-feet state-plane tile would silently shrink every buffer by 3.28×. Geographic CRSs are rejected.</p>
-<p><strong>Labels are weak, and the code says so.</strong> This 3DEP delivery is classified only to ground, unclassified, noise and bridge, the norm for 3DEP. There are no vegetation, wire or building labels to learn from. Training labels come from:</p>
+<p><strong>Distances are always metres.</strong> Point clouds stay in their native CRS, and every parameter is converted with <code><a href="reference/las_m_per_unit.html">las_m_per_unit()</a></code>. The Nashville tiles are in US survey feet; without the conversion every buffer would silently shrink 3.28×. Geographic CRSs are rejected.</p>
+<p><strong>Labels are weak, and the code says so.</strong> Training labels come from:</p>
 <ul>
 <li>
 <strong>building:</strong> OSM footprints, shrunk 1 m inward so crowns overhanging eaves don’t count as roof.</li>
 <li>
 <strong>structure:</strong> OSM pole and tower nodes.</li>
 <li>
-<strong>wire:</strong> an air-gap test (an elevated, thin layer with empty space beneath it across a 3×3 m window) plus an <strong>along-line run test</strong> in chainage/offset coordinates. Each conductor row must extend ≥ 12 m along the line. Parallel phases pass; crown tops are compact and don’t.</li>
+<strong>wire:</strong> an air-gap test (an elevated layer with empty space beneath it across a 3×3 m window) plus an <strong>along-line run test</strong> in chainage/offset coordinates: each conductor row must extend ≥ 12 m along <em>any</em> mapped line in the area, so second circuits on a shared right-of-way are labelled too. Crown tops are compact and fail.</li>
 <li>
 <strong>vegetation:</strong> everything else.</li>
 </ul>
 <p>Elevated near-line candidates that fail the wire test <strong>abstain</strong> (NA) rather than becoming “vegetation”, so missed conductors aren’t taught as trees.</p>
-<p><strong>Validation is spatial, and the gap is reported.</strong> Neighbouring LiDAR points share neighbourhoods, so random k-fold CV leaks information between folds. Folds are 100 m spatial blocks, and both schemes are reported. Precision is measured at the site’s real class prevalence (wire is 0.04% of points). The headline metric is average precision against its no-skill baseline, plus an ablation that drops the features which encode the labelling rule (height, echo structure).</p>
-<p><strong>Class weighting is undone at prediction time.</strong> The forest trains with inverse-frequency case weights, which estimates posteriors under equal priors. <code><a href="reference/classify_probs.html">classify_probs()</a></code> multiplies by the true prevalence and renormalises. Without that correction the model flagged about 25,000 vegetation points as “wire” (precision 0.02).</p>
-<p><strong>Conductor elevation is bounded, not guessed.</strong> A “constant height above the ground below” conductor model is wrong wherever a span crosses a gully, and this line drops 250 m into a canyon. <code><a href="reference/conductor_profile.html">conductor_profile()</a></code> brackets the conductor:</p>
+<p><strong>Validation is spatial, and the gap is reported.</strong> Folds are 100 m spatial blocks; random folds are reported alongside. Precision is measured at real class prevalence, and the headline metric is average precision against its no-skill value. An ablation drops the features that encode the labelling rule (height, echo structure).</p>
+<p><strong>Class weighting is undone at prediction time.</strong> The forest trains with inverse-frequency case weights, i.e. under equal priors; <code><a href="reference/classify_probs.html">classify_probs()</a></code> multiplies by the true prevalence and renormalises. Without that, the Colorado model called about 25,000 vegetation points “wire”.</p>
+<p><strong>Conductor elevation is bounded, not guessed.</strong> <code><a href="reference/conductor_profile.html">conductor_profile()</a></code> uses classified conductor returns where they pass sanity checks: more than one mask radius from a structure (guy wires and crossarms are linear too), a robust low quantile per 5 m bin, above the code minimum, and at a plausible slope to neighbouring bins. Elsewhere it brackets the conductor:</p>
 <ul>
 <li>
-<strong>lower bound:</strong> ground + 4.9 m, roughly the NESC clearance for 115 kV over land accessible only to pedestrians.</li>
+<strong>lower bound:</strong> ground + NESC minimum clearance.</li>
 <li>
-<strong>upper bound:</strong> the straight chord between the supports either side of a station, each at ground + 20 m. A conductor sags below the chord between its attachments. Where the next support lies outside the data, the upper bound is reported as unknown rather than invented.</li>
-</ul>
-<p>Conductor returns override the bounds only if they pass sanity checks:</p>
-<ul>
-<li>They are farther than 8 m from a structure. Guy wires, crossarms and insulators there are elevated and linear too, and an earlier version mistook them for conductors.</li>
-<li>The 25th percentile per 5 m bin lies above the code-minimum lower bound.</li>
-<li>The implied slope to a neighbouring bin is ≤ 0.2.</li>
+<strong>upper bound:</strong> the chord between the supports either side, at ground + a maximum attachment height. A conductor sags below the chord between its attachments. Where the next support lies outside the data, the upper bound is reported as unknown.</li>
 </ul>
 <p>Every risk metric is computed under both bounds, and each segment is labelled <code>measured</code>, <code>robust</code> (same answer under both bounds) or <code>bound-dependent</code>.</p>
-<p><strong>Fall-in uses 3D geometry and terrain.</strong> A tree pivoting at its base sweeps a sphere of radius <em>h</em>. It can strike if the 3D distance from its base to the nearest conductor point (DTM at the tree, modelled conductor elevation, outer phases 5.5 m from the centreline) is ≤ <em>h</em>. Trees inside the under-line zone count as grow-in, not strike, so nothing is double-counted.</p>
-<p><strong>Only consensus vegetation enters the canopy model.</strong> At the real class mix, the prior-corrected classifier rarely predicts wire. Building the canopy height model from its argmax alone would let conductor returns over trees set the canopy height to the conductor’s height, giving zero clearance by construction. So the canopy height model uses only points that both the model and the rules call vegetation.</p>
-<p><strong>Structures are masked.</strong> H-frames and crossarms otherwise appear as 18 m “trees” right under the conductors. Cells within 8 m of OSM structure nodes and the line’s vertices are treated as unobserved. OSM mappers put a node at each structure, and here they match the H-frames visible in the point cloud. Features one or two cells wide are removed with a 3×3 crown-support filter.</p>
-<div class="float">
-<img src="reference/figures/conductor_profile.png" alt="Conductor profile"><div class="figcaption">Conductor profile</div>
-</div>
+<p><strong>Conductor returns are removed from the canopy model, but trees are not.</strong> Conductors that cross canopy aren’t “suspended”, so the rules label them vegetation, and they would put “trees” at wire height under the whole line. <code><a href="reference/corridor_rasters.html">corridor_rasters()</a></code> removes points inside the conductor envelope at or above the measured conductor elevation only if they are wire-like:</p>
+<ul>
+<li>locally linear, or</li>
+<li>suspended: nothing in the 1.5 m layer just beneath the conductor band across a 3×3 m neighbourhood. Bundled 500 kV conductors form ribbons rather than lines, so this second test matters.</li>
+</ul>
+<p>A crown that reaches wire height has foliage beneath it and stays, so it is still flagged. The envelope comes from where conductor returns actually are and is capped at the grow-in zone, so tall trees beside the line keep their tops for the fall-in test. Cells emptied by the removal are treated as unobserved, not bare ground.</p>
+<p><strong>Fall-in uses 3D geometry and terrain.</strong> A tree pivoting at its base sweeps a sphere of radius <em>h</em>. It can strike if the 3D distance from its base to the nearest conductor point (DTM at the tree, modelled conductor elevation, measured outer-phase offset) is ≤ <em>h</em>. Trees inside the grow-in zone count as grow-in, not strike.</p>
+<p><strong>Structures are masked.</strong> Towers, H-frames and crossarms otherwise look like tall trees under the conductors. Cells within a structure-sized radius of OSM structure nodes and line vertices (for every circuit in the corridor) are treated as unobserved, and features one or two cells wide are removed with a 3×3 crown-support filter.</p>
 </div>
 <div class="section level2">
-<h2 id="results">Results<a class="anchor" aria-label="anchor" href="#results"></a>
+<h2 id="case-study-1-sunshine-canyon-colorado">Case study 1: Sunshine Canyon, Colorado<a class="anchor" aria-label="anchor" href="#case-study-1-sunshine-canyon-colorado"></a>
 </h2>
-<p><strong>Classifier.</strong> These are spatially blocked CV results, scored against weak labels at site prevalence:</p>
-<table class="table">
-<colgroup>
-<col width="13%">
-<col width="17%">
-<col width="17%">
-<col width="17%">
-<col width="17%">
-<col width="17%">
-</colgroup>
-<thead><tr>
-<th>class</th>
-<th align="right">n</th>
-<th align="right">prevalence</th>
-<th align="right">avg. precision (spatial)</th>
-<th align="right">avg. precision (random folds)</th>
-<th align="right">avg. precision (spatial, no height/echo)</th>
-</tr></thead>
-<tbody>
-<tr>
-<td>vegetation</td>
-<td align="right">2,144,780</td>
-<td align="right">0.997</td>
-<td align="right">0.999</td>
-<td align="right">0.999</td>
-<td align="right">0.999</td>
-</tr>
-<tr>
-<td>building</td>
-<td align="right">3,608</td>
-<td align="right">0.0017</td>
-<td align="right">0.67</td>
-<td align="right">0.85</td>
-<td align="right">0.71</td>
-</tr>
-<tr>
-<td>structure</td>
-<td align="right">1,602</td>
-<td align="right">0.0007</td>
-<td align="right">0.025</td>
-<td align="right">0.44</td>
-<td align="right">0.007</td>
-</tr>
-<tr>
-<td>wire</td>
-<td align="right">920</td>
-<td align="right">0.0004</td>
-<td align="right">0.008</td>
-<td align="right">0.20</td>
-<td align="right">0.011</td>
-</tr>
-</tbody>
-</table>
 <div class="float">
-<img src="reference/figures/cv_metrics.png" alt="Cross-validation"><div class="figcaption">Cross-validation</div>
+<img src="reference/figures/sunshine_conductor_profile.png" alt="Sunshine conductor profile"><div class="figcaption">Sunshine conductor profile</div>
 </div>
-<ul>
-<li>
-<strong>Buildings transfer across space.</strong> Average precision is 0.67, against a no-skill value of 0.0017.</li>
-<li>
-<strong>Wires and structures don’t.</strong> Random-fold CV makes them look learnable (average precision 0.20 and 0.44), but under spatial blocking they drop to 0.008 and 0.025: some lift over prevalence, nothing usable. Wire and structure labels occur in only 3 of the 5 spatial folds, which is effectively a handful of spans and five structures.</li>
-<li>
-<strong>Random CV on point clouds would have produced a misleading model card.</strong> That is the main methodological result here.</li>
-</ul>
-<p><strong>Corridor.</strong> The honest answer is that public data can’t decide grow-in on this line:</p>
+<p><strong>The conductor is barely sampled.</strong> After the sanity checks, conductor returns survive along 2% of the line, and spans run 257–468 m between H-frames across a 250 m descent into the canyon. Along 22% of the line the next support is outside the data, so there is no upper bound at all.</p>
 <table class="table">
 <colgroup>
 <col width="33%">
@@ -264,29 +276,228 @@ OSM line (Overpass) ──┘                │
 <tbody>
 <tr>
 <td>segments with ≥ 5 m² of canopy in the clearance envelope</td>
-<td><strong>0 of 29</strong></td>
-<td><strong>28 of 29</strong></td>
+<td><strong>3 of 30</strong></td>
+<td>28 of 30</td>
 </tr>
 <tr>
 <td>potential strike trees</td>
-<td>0</td>
-<td>288</td>
+<td>19</td>
+<td>307</td>
 </tr>
 </tbody>
 </table>
 <ul>
 <li>
-<strong>Conductor returns are scarce.</strong> After the sanity checks, they survive along only 1% of the line; the 2020 acquisition rarely sampled the conductors mid-span.</li>
+<strong>3 robust grow-in candidates.</strong> The top one (about 1.01–1.06 km along the line, conductor measured along 41% of it) has a conductor about 15 m up, leaving a low H-frame on the canyon floor, beside riparian cottonwoods up to 27 m tall. The other two have trees of 20–29 m that exceed even the highest plausible conductor. They are the places to verify with imagery or a field visit first.</li>
 <li>
-<strong>Spans are long.</strong> The supports are 257–468 m apart, so the conductor could be anywhere in a band tens of metres tall (see the profile above).</li>
-<li>
-<strong>Every segment is <code>bound-dependent</code>.</strong> The ranking by pessimistic encroachment (<code>segments.csv</code>) is a “where to look first” list, not a finding. The top two segments (1.06–1.16 km along the line) are tall riparian stands on the canyon floor, beneath the longest span.</li>
-<li>
-<strong>An earlier version said otherwise.</strong> It reported 3 “robust” grow-in segments. Review traced them to guy-wire returns read as conductor and to a span-length assumption the line violates. Both are fixed and covered by tests.</li>
+<strong>27 segments are bound-dependent.</strong> Whether they need work depends on where the conductor actually is, which this acquisition doesn’t show.</li>
 </ul>
-<p><strong>What would turn this into a decision:</strong> structure attachment heights, or the utility’s sag-and-tension model (e.g. PLS-CADD), would collapse the band to a single line. So would a LiDAR flight planned to capture conductors. Everything downstream (clearances, 3D strike geometry, segment ranking) already takes a conductor profile as input.</p>
+<table class="table">
+<colgroup>
+<col width="13%">
+<col width="17%">
+<col width="17%">
+<col width="17%">
+<col width="17%">
+<col width="17%">
+</colgroup>
+<thead><tr>
+<th>class</th>
+<th align="right">n</th>
+<th align="right">prevalence</th>
+<th align="right">avg. precision, spatial blocks</th>
+<th align="right">random folds</th>
+<th align="right">spatial, no height/echo</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>building</td>
+<td align="right">3,608</td>
+<td align="right">0.0016</td>
+<td align="right">0.36</td>
+<td align="right">0.85</td>
+<td align="right">0.51</td>
+</tr>
+<tr>
+<td>structure</td>
+<td align="right">1,602</td>
+<td align="right">0.0007</td>
+<td align="right">0.012</td>
+<td align="right">0.41</td>
+<td align="right">0.011</td>
+</tr>
+<tr>
+<td>wire</td>
+<td align="right">914</td>
+<td align="right">0.0004</td>
+<td align="right">0.004</td>
+<td align="right">0.22</td>
+<td align="right">0.005</td>
+</tr>
+</tbody>
+</table>
+<p>With only a few hundred metres of labelled conductor and five structures, wires and structures don’t generalise across space here. Random folds would have hidden that.</p>
 <div class="float">
-<img src="reference/figures/cross_section.png" alt="Cross-section"><div class="figcaption">Cross-section</div>
+<img src="reference/figures/sunshine_cross_section.png" alt="Sunshine cross-section"><div class="figcaption">Sunshine cross-section</div>
+</div>
+</div>
+<div class="section level2">
+<h2 id="case-study-2-west-nashville-tennessee">Case study 2: West Nashville, Tennessee<a class="anchor" aria-label="anchor" href="#case-study-2-west-nashville-tennessee"></a>
+</h2>
+<div class="float">
+<img src="reference/figures/nashville_conductor_profile.png" alt="Nashville conductor profile"><div class="figcaption">Nashville conductor profile</div>
+</div>
+<p><strong>The conductor is measured along the whole line.</strong> The 500 kV bundles were well sampled: 104,650 conductor returns, three phases at about −12, 0 and +12 m, and a second circuit sharing the right-of-way at +30–45 m. The profile shows clean catenaries between towers, about 15–45 m above the ground (median 24 m).</p>
+<p><strong>Classifier against weak labels (spatial blocks):</strong></p>
+<table class="table">
+<colgroup>
+<col width="13%">
+<col width="17%">
+<col width="17%">
+<col width="17%">
+<col width="17%">
+<col width="17%">
+</colgroup>
+<thead><tr>
+<th>class</th>
+<th align="right">n</th>
+<th align="right">prevalence</th>
+<th align="right">avg. precision, spatial blocks</th>
+<th align="right">random folds</th>
+<th align="right">spatial, no height/echo</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>wire</td>
+<td align="right">104,650</td>
+<td align="right">0.10</td>
+<td align="right"><strong>0.88</strong></td>
+<td align="right">0.94</td>
+<td align="right">0.83</td>
+</tr>
+<tr>
+<td>structure</td>
+<td align="right">4,262</td>
+<td align="right">0.004</td>
+<td align="right">0.03</td>
+<td align="right">0.26</td>
+<td align="right">0.02</td>
+</tr>
+</tbody>
+</table>
+<div class="float">
+<img src="reference/figures/nashville_cv_metrics.png" alt="Nashville cross-validation"><div class="figcaption">Nashville cross-validation</div>
+</div>
+<p>Wires transfer across space here: average precision 0.88 against a no-skill 0.10, and 0.83 even without the height and echo features that encode the labelling rule. Structures (31 lattice towers) still don’t.</p>
+<p><strong>Against the vendor’s classes.</strong> These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can’t show skill: predicting “vegetation” everywhere scores 0.993.</p>
+<table class="table">
+<colgroup>
+<col width="15%">
+<col width="21%">
+<col width="21%">
+<col width="21%">
+<col width="21%">
+</colgroup>
+<thead><tr>
+<th></th>
+<th align="right">vegetation F1</th>
+<th align="right">building F1</th>
+<th align="right">balanced accuracy</th>
+<th align="right">Cohen’s κ</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>always “vegetation” (baseline)</td>
+<td align="right">0.993</td>
+<td align="right">0</td>
+<td align="right">0.50</td>
+<td align="right">0</td>
+</tr>
+<tr>
+<td>weak labels</td>
+<td align="right">0.948</td>
+<td align="right">0</td>
+<td align="right">0.46</td>
+<td align="right">−0.01</td>
+</tr>
+<tr>
+<td>model trained on weak labels</td>
+<td align="right">0.955</td>
+<td align="right">0</td>
+<td align="right">0.46</td>
+<td align="right">−0.01</td>
+</tr>
+<tr>
+<td>Colorado model, transferred</td>
+<td align="right">0.993</td>
+<td align="right">0</td>
+<td align="right">0.50</td>
+<td align="right">0.00</td>
+</tr>
+<tr>
+<td><strong>trained on vendor labels (spatial CV)</strong></td>
+<td align="right">0.998</td>
+<td align="right">
+<strong>0.87</strong> (AP 0.95)</td>
+<td align="right">0.89</td>
+<td align="right">—</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>
+<strong>On vegetation vs building, the weak-label pipeline has no skill at this site.</strong> OSM maps one building in the corridor, so there are no building labels to learn from. The vendor’s labels would buy a building F1 of 0.87. The weak models’ lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.</li>
+<li>
+<strong>The Colorado model doesn’t transfer.</strong> With its own class prior it recalls 0% of Nashville’s conductor returns. Threshold-free, its wire average precision is 0.22 against a 0.10 baseline (the Nashville model: 0.87). Its 0.993 vegetation F1 is exactly the baseline.</li>
+</ul>
+<p><strong>Risk screen.</strong> The same segments, with three different canopy models:</p>
+<table class="table">
+<colgroup>
+<col width="20%">
+<col width="26%">
+<col width="26%">
+<col width="26%">
+</colgroup>
+<thead><tr>
+<th>canopy model</th>
+<th align="right">grow-in</th>
+<th align="right">fall-in</th>
+<th align="right">clear</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>vendor vegetation classes, as delivered</td>
+<td align="right">39</td>
+<td align="right">0</td>
+<td align="right">0</td>
+</tr>
+<tr>
+<td>vendor vegetation + this package’s conductor removal</td>
+<td align="right">0</td>
+<td align="right">10</td>
+<td align="right">29</td>
+</tr>
+<tr>
+<td>
+<strong>this package</strong> (consensus vegetation + conductor removal)</td>
+<td align="right"><strong>0</strong></td>
+<td align="right"><strong>7</strong></td>
+<td align="right"><strong>32</strong></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>
+<strong>The delivered classes would send crews to every span.</strong> Removing conductor returns is the whole grow-in correction (39 → 0). Consensus labelling (model and weak rules agreeing on vegetation, vendor buildings removed) then trims fall-in from 10 segments to 7.</li>
+<li>
+<strong>No grow-in.</strong> The managed right-of-way is clear under the conductors.</li>
+<li>
+<strong>24 strike trees across 7 segments,</strong> 28–39 m from the centreline, the same under both bounds because the conductor is measured. They are the list to verify.</li>
+<li>
+<strong>The conductor envelope has to cover every phase.</strong> An earlier run capped it at 15 m while one outer phase sits up to ~19 m from the OSM centreline. That left outer-phase returns in the canopy model, which showed up as 2 grow-in segments and 4 extra strike trees at the envelope edge. Widening the grow-in zone to 21 m removed all of them.</li>
+</ul>
+<div class="float">
+<img src="reference/figures/nashville_cross_section.png" alt="Nashville cross-section"><div class="figcaption">Nashville cross-section</div>
 </div>
 </div>
 <div class="section level2">
@@ -294,21 +505,21 @@ OSM line (Overpass) ──┘                │
 </h2>
 <ul>
 <li>
-<strong>Weak labels.</strong> Every accuracy number above measures agreement with the labelling rules, not ground truth. The next step is a few hundred hand-labelled points in held-out blocks (e.g. in CloudCompare) for a true test set.</li>
+<strong>Weak labels.</strong> Wire and structure accuracy is agreement with the labelling rules. Nashville’s vendor classes give real ground truth for vegetation and buildings only, and they themselves misclassify conductors. A hand-labelled test set (e.g. in CloudCompare) is the next step.</li>
 <li>
-<strong>Sparse conductor sampling.</strong> This 2020 acquisition rarely returned the conductors mid-span, so the conductor is bounded, not measured (see above).</li>
+<strong>Bounds rest on assumptions.</strong> Attachment heights are capped (20 m for the H-frames, 45 m for the lattice towers), and every support is assumed to be an OSM vertex or tagged node. A taller or unmapped structure would invalidate the upper bound locally.</li>
 <li>
-<strong>Bounds rest on assumptions.</strong> Attachments are taken as ≤ 20 m above ground, and every support is assumed to be an OSM vertex. A taller structure, or an unmapped intermediate structure, would invalidate the upper bound locally.</li>
+<strong>Conductor removal is a judgement.</strong> Canopy within ~1.5 m beneath a conductor can’t be told apart from a conductor over dense canopy; both are kept as canopy and flagged as grow-in, which is the conservative choice.</li>
 <li>
-<strong>OSM geometry.</strong> The centreline is digitised by volunteers. Detected conductor returns sit a median 4.9 m from it, consistent with ±5 m phase spacing plus 1–2 m of digitising error. Structures that aren’t OSM vertices are not masked.</li>
+<strong>Second circuits</strong> are labelled and their towers masked, but only the study line gets a conductor profile; second-circuit returns over canopy can remain in the canopy model beyond the study line’s envelope.</li>
 <li>
-<strong>The structure mask</strong> hides canopy within 8 m of each support, so strike trees right beside structures are not scored.</li>
+<strong>OSM geometry</strong> is volunteer-digitised. Conductor envelopes are sized from where returns actually are, not from the centreline alone.</li>
 <li>
-<strong>Treetops from a CHM</strong> (local maxima, 5 m window) merge or split crowns in dense stands. Individual-tree segmentation would sharpen the strike-tree counts.</li>
+<strong>The structure mask</strong> hides canopy close to each support, so strike trees right beside structures are not scored.</li>
 <li>
-<strong>Vertical units</strong> are assumed to match horizontal units. That holds for this UTM/NAVD88-metre delivery, but some state-plane products mix feet and metres.</li>
+<strong>Treetops from a CHM</strong> (local maxima, 5 m window) merge or split crowns in dense stands.</li>
 <li>
-<strong>A single line and a single acquisition.</strong> Spatial CV tests transfer to other spans of the same line, not to other lines, regions or sensors.</li>
+<strong>Vertical units</strong> are assumed to match horizontal units (true for both deliveries: metres/metres and US survey feet/US survey feet).</li>
 </ul>
 </div>
 <div class="section level2">
@@ -318,16 +529,17 @@ OSM line (Overpass) ──┘                │
 <code class="sourceCode R"><span><span class="co"># R &gt;= 4.3</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/install.packages.html" class="external-link">install.packages</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"lidR"</span>, <span class="st">"sf"</span>, <span class="st">"terra"</span>, <span class="st">"lwgeom"</span>, <span class="st">"ranger"</span>, <span class="st">"FNN"</span>, <span class="st">"data.table"</span>,</span>
 <span>                   <span class="st">"httr2"</span>, <span class="st">"units"</span>, <span class="st">"withr"</span>, <span class="st">"ggplot2"</span>, <span class="st">"scales"</span>, <span class="st">"devtools"</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
-<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="ex">Rscript</span> analysis/run_sunshine_canyon.R   <span class="co"># downloads ~0.6 GB of 3DEP LiDAR on first run; ~4 min after that</span></span>
-<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'devtools::test()'</span>           <span class="co"># unit tests: synthetic geometry + lidR example data, no network</span></span></code></pre></div>
-<p>The OSM layers used in the case study are cached in <code>data-raw/*.geojson</code>, so reruns are reproducible even if OSM changes. Outputs go to <code>output/</code>: <code>segments.gpkg</code>, <code>trees.gpkg</code>, <code>segments.csv</code>, <code>conductor_profile.csv</code> and <code>cv_metrics.csv</code>.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="ex">Rscript</span> analysis/run_sunshine_canyon.R   <span class="co"># ~0.6 GB of 3DEP LiDAR on first run</span></span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="ex">Rscript</span> analysis/run_nashville.R         <span class="co"># ~0.3 GB; uses the Colorado model for the transfer test</span></span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'devtools::test()'</span>           <span class="co"># unit tests: synthetic geometry + lidR example data, no network</span></span></code></pre></div>
+<p>Cross-validation is the slow part (minutes on mains power, much longer on battery). Set <code>VEGRISK_REUSE=1</code> to reuse a site’s saved model and validation results and recompute only labels and risk. The OSM layers used are cached in <code>data-raw/&lt;site&gt;/*.geojson</code>, so reruns are reproducible even if OSM changes. Outputs go to <code>output/&lt;site&gt;/</code>: <code>segments.gpkg</code>, <code>trees.gpkg</code>, <code>segments.csv</code>, <code>conductor_profile.csv</code>, <code>cv_metrics.csv</code>, <code>summary.rds</code>.</p>
 </div>
 <div class="section level2">
 <h2 id="data">Data<a class="anchor" aria-label="anchor" href="#data"></a>
 </h2>
 <ul>
 <li>
-<strong>LiDAR:</strong> U.S. Geological Survey 3D Elevation Program, <code>CO_DRCOG_2020_B20</code> tiles <code>w0472n4429</code> and <code>w0472n4430</code>, public domain.</li>
+<strong>LiDAR:</strong> U.S. Geological Survey 3D Elevation Program, public domain: <code>CO_DRCOG_2020_B20</code> tiles <code>w0472n4429</code>, <code>w0472n4430</code>; <code>TN_DavidsonCounty_D22</code> tiles <code>155020</code>, <code>155060</code>, <code>155100</code>, <code>155140</code>, <code>169020</code>.</li>
 <li>
 <strong>Power lines, structures, buildings:</strong> © OpenStreetMap contributors, ODbL.</li>
 </ul>

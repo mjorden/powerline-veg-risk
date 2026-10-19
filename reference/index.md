@@ -40,6 +40,8 @@
   : Cross-validate the point classifier: spatial blocks vs random folds
 - [`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md)
   : Prior-corrected class probabilities
+- [`evaluate_vendor_classes()`](https://mjorden.github.io/powerline-veg-risk/reference/evaluate_vendor_classes.md)
+  : Score labels against vendor-delivered ASPRS classes
 - [`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md)
   : Classify all featurised points
 

@@ -18,6 +18,7 @@ cv_point_classifier(
   mtry = NULL,
   drop_features = NULL,
   eval_veg_frac = 0.1,
+  random = TRUE,
   seed = 1
 )
 ```
@@ -45,6 +46,10 @@ cv_point_classifier(
 - eval_veg_frac:
 
   Fraction of held-out vegetation points scored.
+
+- random:
+
+  Also run random k-fold CV for comparison.
 
 - seed:
 

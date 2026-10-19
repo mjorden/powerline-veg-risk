@@ -56,7 +56,17 @@ conductor's height - zero clearance by construction.</p>
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">corridor_rasters</span><span class="op">(</span><span class="va">las</span>, <span class="va">pred</span>, res_m <span class="op">=</span> <span class="fl">1</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">corridor_rasters</span><span class="op">(</span></span>
+<span>  <span class="va">las</span>,</span>
+<span>  <span class="va">pred</span>,</span>
+<span>  res_m <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  profile <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  envelope_m <span class="op">=</span> <span class="fl">15</span>,</span>
+<span>  below_m <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  min_linearity <span class="op">=</span> <span class="fl">0.6</span>,</span>
+<span>  gap_m <span class="op">=</span> <span class="fl">1.5</span>,</span>
+<span>  drop <span class="op">=</span> <span class="cn">NULL</span></span>
+<span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -68,17 +78,66 @@ conductor's height - zero clearance by construction.</p>
 
 
 <dt id="arg-pred">pred<a class="anchor" aria-label="anchor" href="#arg-pred"></a></dt>
-<dd><p>Output of <code><a href="predict_points.html">predict_points()</a></code> (with the weak <code>label</code> column).</p></dd>
+<dd><p>Output of <code><a href="predict_points.html">predict_points()</a></code> (with the weak <code>label</code> column and
+the <code>linearity_k10</code> feature).</p></dd>
 
 
 <dt id="arg-res-m">res_m<a class="anchor" aria-label="anchor" href="#arg-res-m"></a></dt>
 <dd><p>Raster resolution in metres.</p></dd>
 
+
+<dt id="arg-profile">profile<a class="anchor" aria-label="anchor" href="#arg-profile"></a></dt>
+<dd><p>Optional output of <code><a href="conductor_profile.html">conductor_profile()</a></code>.</p></dd>
+
+
+<dt id="arg-envelope-m">envelope_m<a class="anchor" aria-label="anchor" href="#arg-envelope-m"></a></dt>
+<dd><p>Half-width of the conductor envelope (metres).</p></dd>
+
+
+<dt id="arg-below-m">below_m<a class="anchor" aria-label="anchor" href="#arg-below-m"></a></dt>
+<dd><p>Depth below the measured conductor still treated as
+conductor returns (sag between bins, bundle spacing).</p></dd>
+
+
+<dt id="arg-min-linearity">min_linearity<a class="anchor" aria-label="anchor" href="#arg-min-linearity"></a></dt>
+<dd><p>Linearity needed for an envelope point to count as a
+conductor return.</p></dd>
+
+
+<dt id="arg-gap-m">gap_m<a class="anchor" aria-label="anchor" href="#arg-gap-m"></a></dt>
+<dd><p>Empty space beneath a candidate cluster for it to count as
+suspended.</p></dd>
+
+
+<dt id="arg-drop">drop<a class="anchor" aria-label="anchor" href="#arg-drop"></a></dt>
+<dd><p>Optional logical vector over <code>pred</code> rows of points to keep out
+of the canopy model (e.g. vendor-classified buildings).</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A list with <code>dtm</code> (ground elevation) and <code>chm</code> (canopy height),
-both <code>SpatRaster</code> in metres.</p>
+both <code>SpatRaster</code> in metres, <code>unobserved</code> (logical <code>SpatRaster</code> or
+<code>NULL</code>), and <code>n_conductor_excluded</code>.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>Conductor returns that cross over canopy are not "suspended" (there is
+canopy below them), so the rules can label them vegetation. When a
+conductor <code>profile</code> is supplied, points are excluded as conductor returns
+only if they are (a) within <code>envelope_m</code> of the centreline where the
+conductor is measured, (b) at or above the measured conductor elevation
+minus <code>below_m</code>, and (c) wire-like: either locally linear
+(<code>linearity_k10 &gt;= min_linearity</code>) or locally suspended - no return of
+any kind in the <code>gap_m</code> layer just beneath the conductor band (measured
+conductor elevation minus <code>below_m</code>) within its 3 x 3 m neighbourhood
+(bundled conductors form ribbons, not lines, so linearity alone misses
+them). A tree crown that reaches wire height has foliage below it and
+stays in the canopy model, as does canopy within <code>gap_m</code> of a conductor
+(which the clearance target flags anyway). Cells that held excluded points and no remaining canopy are
+returned as <code>unobserved</code> (not bare ground). Keep <code>envelope_m</code> no wider
+than the grow-in zone used in <code><a href="assess_risk.html">assess_risk()</a></code>, or tall side trees could
+lose their tops before the fall-in test.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -1,9 +1,9 @@
 # powerline-veg-risk
 
-**Screening a transmission corridor for vegetation risk from public
+**Screening transmission corridors for vegetation risk from public
 airborne LiDAR, in R.**
 
-`vegrisk` is a small R package plus a reproducible case study. It takes
+`vegrisk` is an R package plus two reproducible case studies. It takes
 USGS 3DEP point clouds (LAS/LAZ) and OpenStreetMap power-line geometry
 and produces a segment-by-segment screen for the two vegetation failure
 modes utilities manage:
@@ -13,36 +13,65 @@ modes utilities manage:
 - **Fall-in:** “strike trees” beside the line that are tall enough to
   reach a conductor if they fall.
 
-The case study is the **Sunshine–Boulder Hydro 115 kV line** in Sunshine
-Canyon, Boulder County, Colorado. It’s wildland–urban interface: the
-2010 Fourmile Canyon Fire burned about 2.5 km to the north-west. Inputs
-are 1.46 km of line, about 2.2 M above-ground LiDAR points (USGS
-`CO_DRCOG_2020`, ~35 pts/m²), 5 tagged OSM structures, and 33 OSM
-buildings.
+|  | Sunshine Canyon, CO | West Nashville, TN |
+|----|----|----|
+| Line | Sunshine–Boulder Hydro 115 kV, wood H-frames | TVA Maury–Davidson 500 kV, lattice towers, shared right-of-way |
+| Setting | Wildland–urban interface (2010 Fourmile Canyon Fire burned ~2.5 km away) | Wooded hills, managed right-of-way |
+| LiDAR | `CO_DRCOG_2020`, UTM metres, ~35 pts/m² | `TN_DavidsonCounty_D22`, Tennessee State Plane **US survey feet**, ~34 pts/m² |
+| Delivered classes | ground / unclassified / noise only | \+ vegetation (3–5) and buildings (6) |
+| Line length, above-ground points | 1.52 km, 2.26 M | 2.0 km, 1.05 M |
+| Conductor returns found | 914 | 104,650 |
+| Conductor elevation measured along | 2% of the line | **~100%** of the line |
+| Result | Bounded: 3 robust grow-in candidates, 27 segments undecidable | Decisive: no grow-in, 24 strike trees in 7 segments, 32 clear |
 
-![Risk map](reference/figures/risk_map.png)
+## Headline findings
 
-Risk map
+1.  **No public 3DEP project from 2019 on labels power lines.** I
+    sampled the classification of all 641 USGS 3DEP projects from 2019
+    onward in the public Entwine index. None uses the ASPRS wire
+    classes; the few hits for codes 13/14 were topobathy datasets or
+    state-specific reuse (NC Phase 4 uses 13 for roads). Conductor
+    labels have to be derived.
+2.  **Whether public LiDAR can decide grow-in depends on whether it
+    sampled the conductors.** In Colorado it barely did, so the
+    conductor is bounded within a band tens of metres tall and 27 of 30
+    segments stay undecidable. In Nashville, the 500 kV bundles were
+    sampled along almost the whole line, so the same pipeline gives a
+    measured, decisive screen.
+3.  **Vendor vegetation classes contain the conductors.** In Nashville,
+    99.3% of conductor returns (103,918 points, 15–45 m up) are
+    delivered as *high vegetation*. A canopy model built straight from
+    the delivered classes flags **every one** of the 39 segments as
+    grow-in; with conductor returns removed, none are.
+4.  **Random cross-validation on point clouds misleads.** Random folds
+    report a Colorado wire average precision of 0.22; 100 m spatial
+    blocks report 0.004. A model trained in Colorado doesn’t transfer to
+    Nashville (wire recall 0).
+
+![Nashville risk map](reference/figures/nashville_risk_map.png)
+
+Nashville risk map
 
 ## Pipeline
 
     3DEP tiles (TNM API) ─┐
-                          ├─ clip to 45 m corridor ─ height-normalise (TIN on class 2)
-    OSM line (Overpass) ──┘                │
+                          ├─ clip to corridor ─ height-normalise (TIN on class 2)
+    OSM lines (Overpass) ─┘                │
                                            ▼
               per-point features: multi-scale eigenvalue shape (k = 10, 30),
               echo structure, intensity percentile, height
                                            │
-              weak labels from GIS + geometry (no labelled classes in 3DEP)
+              weak labels from GIS + geometry (3DEP has no wire classes)
                                            │
               random forest (ranger), class-weighted, prior-corrected;
-              spatially blocked CV vs random CV; feature ablation
-                                           │
-              vegetation-only canopy height model ─ treetops (local maxima)
+              spatially blocked CV vs random CV; feature ablation;
+              vendor-class ground truth where it exists
                                            │
               conductor elevation: measured where seen, bounded elsewhere
                                            │
-              per 50 m segment: clearance encroachment + strike trees
+              canopy model from consensus vegetation, conductor returns removed
+                                           │
+              per 50 m segment: clearance encroachment + 3D strike trees
               under both conductor bounds, with a confidence label
 
 | Step | Function | File |
@@ -51,192 +80,246 @@ Risk map
 | Corridor clip, noise removal, height normalisation, CRS-unit safety | [`read_corridor()`](https://mjorden.github.io/powerline-veg-risk/reference/read_corridor.md), [`line_corridor()`](https://mjorden.github.io/powerline-veg-risk/reference/line_corridor.md), [`las_m_per_unit()`](https://mjorden.github.io/powerline-veg-risk/reference/las_m_per_unit.md) | [R/preprocess.R](https://mjorden.github.io/powerline-veg-risk/R/preprocess.R) |
 | Point features | [`point_features()`](https://mjorden.github.io/powerline-veg-risk/reference/point_features.md) | [R/features.R](https://mjorden.github.io/powerline-veg-risk/R/features.R) |
 | Weak labels | [`weak_labels()`](https://mjorden.github.io/powerline-veg-risk/reference/weak_labels.md) | [R/labels.R](https://mjorden.github.io/powerline-veg-risk/R/labels.R) |
-| Classifier and validation | [`train_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/train_point_classifier.md), [`cv_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/cv_point_classifier.md), [`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md), [`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md) | [R/classify.R](https://mjorden.github.io/powerline-veg-risk/R/classify.R) |
+| Classifier and validation | [`train_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/train_point_classifier.md), [`cv_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/cv_point_classifier.md), [`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md), [`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md), [`evaluate_vendor_classes()`](https://mjorden.github.io/powerline-veg-risk/reference/evaluate_vendor_classes.md) | [R/classify.R](https://mjorden.github.io/powerline-veg-risk/R/classify.R) |
 | Conductor model and risk | [`conductor_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/conductor_profile.md), [`corridor_rasters()`](https://mjorden.github.io/powerline-veg-risk/reference/corridor_rasters.md), [`assess_risk()`](https://mjorden.github.io/powerline-veg-risk/reference/assess_risk.md) | [R/risk.R](https://mjorden.github.io/powerline-veg-risk/R/risk.R) |
 | Figures | [`plot_risk_map()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.md), [`plot_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_profile.md), [`plot_cross_section()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cross_section.md), [`plot_cv()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cv.md), [`plot_importance()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_importance.md) | [R/plot.R](https://mjorden.github.io/powerline-veg-risk/R/plot.R) |
+| Case studies | `run_case_study(cfg)` + one config script per site | [analysis/](https://mjorden.github.io/powerline-veg-risk/analysis/) |
 
 ## Design decisions worth reading
 
 **Distances are always metres.** Point clouds stay in their native CRS,
 and every parameter is converted with
 [`las_m_per_unit()`](https://mjorden.github.io/powerline-veg-risk/reference/las_m_per_unit.md).
-Without that, a US-survey-feet state-plane tile would silently shrink
-every buffer by 3.28×. Geographic CRSs are rejected.
+The Nashville tiles are in US survey feet; without the conversion every
+buffer would silently shrink 3.28×. Geographic CRSs are rejected.
 
-**Labels are weak, and the code says so.** This 3DEP delivery is
-classified only to ground, unclassified, noise and bridge, the norm for
-3DEP. There are no vegetation, wire or building labels to learn from.
-Training labels come from:
+**Labels are weak, and the code says so.** Training labels come from:
 
 - **building:** OSM footprints, shrunk 1 m inward so crowns overhanging
   eaves don’t count as roof.
 - **structure:** OSM pole and tower nodes.
-- **wire:** an air-gap test (an elevated, thin layer with empty space
-  beneath it across a 3×3 m window) plus an **along-line run test** in
-  chainage/offset coordinates. Each conductor row must extend ≥ 12 m
-  along the line. Parallel phases pass; crown tops are compact and
-  don’t.
+- **wire:** an air-gap test (an elevated layer with empty space beneath
+  it across a 3×3 m window) plus an **along-line run test** in
+  chainage/offset coordinates: each conductor row must extend ≥ 12 m
+  along *any* mapped line in the area, so second circuits on a shared
+  right-of-way are labelled too. Crown tops are compact and fail.
 - **vegetation:** everything else.
 
 Elevated near-line candidates that fail the wire test **abstain** (NA)
 rather than becoming “vegetation”, so missed conductors aren’t taught as
 trees.
 
-**Validation is spatial, and the gap is reported.** Neighbouring LiDAR
-points share neighbourhoods, so random k-fold CV leaks information
-between folds. Folds are 100 m spatial blocks, and both schemes are
-reported. Precision is measured at the site’s real class prevalence
-(wire is 0.04% of points). The headline metric is average precision
-against its no-skill baseline, plus an ablation that drops the features
-which encode the labelling rule (height, echo structure).
+**Validation is spatial, and the gap is reported.** Folds are 100 m
+spatial blocks; random folds are reported alongside. Precision is
+measured at real class prevalence, and the headline metric is average
+precision against its no-skill value. An ablation drops the features
+that encode the labelling rule (height, echo structure).
 
 **Class weighting is undone at prediction time.** The forest trains with
-inverse-frequency case weights, which estimates posteriors under equal
-priors.
+inverse-frequency case weights, i.e. under equal priors;
 [`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md)
-multiplies by the true prevalence and renormalises. Without that
-correction the model flagged about 25,000 vegetation points as “wire”
-(precision 0.02).
+multiplies by the true prevalence and renormalises. Without that, the
+Colorado model called about 25,000 vegetation points “wire”.
 
-**Conductor elevation is bounded, not guessed.** A “constant height
-above the ground below” conductor model is wrong wherever a span crosses
-a gully, and this line drops 250 m into a canyon.
+**Conductor elevation is bounded, not guessed.**
 [`conductor_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/conductor_profile.md)
-brackets the conductor:
+uses classified conductor returns where they pass sanity checks: more
+than one mask radius from a structure (guy wires and crossarms are
+linear too), a robust low quantile per 5 m bin, above the code minimum,
+and at a plausible slope to neighbouring bins. Elsewhere it brackets the
+conductor:
 
-- **lower bound:** ground + 4.9 m, roughly the NESC clearance for 115 kV
-  over land accessible only to pedestrians.
-- **upper bound:** the straight chord between the supports either side
-  of a station, each at ground + 20 m. A conductor sags below the chord
+- **lower bound:** ground + NESC minimum clearance.
+- **upper bound:** the chord between the supports either side, at
+  ground + a maximum attachment height. A conductor sags below the chord
   between its attachments. Where the next support lies outside the data,
-  the upper bound is reported as unknown rather than invented.
-
-Conductor returns override the bounds only if they pass sanity checks:
-
-- They are farther than 8 m from a structure. Guy wires, crossarms and
-  insulators there are elevated and linear too, and an earlier version
-  mistook them for conductors.
-- The 25th percentile per 5 m bin lies above the code-minimum lower
-  bound.
-- The implied slope to a neighbouring bin is ≤ 0.2.
+  the upper bound is reported as unknown.
 
 Every risk metric is computed under both bounds, and each segment is
 labelled `measured`, `robust` (same answer under both bounds) or
 `bound-dependent`.
 
+**Conductor returns are removed from the canopy model, but trees are
+not.** Conductors that cross canopy aren’t “suspended”, so the rules
+label them vegetation, and they would put “trees” at wire height under
+the whole line.
+[`corridor_rasters()`](https://mjorden.github.io/powerline-veg-risk/reference/corridor_rasters.md)
+removes points inside the conductor envelope at or above the measured
+conductor elevation only if they are wire-like:
+
+- locally linear, or
+- suspended: nothing in the 1.5 m layer just beneath the conductor band
+  across a 3×3 m neighbourhood. Bundled 500 kV conductors form ribbons
+  rather than lines, so this second test matters.
+
+A crown that reaches wire height has foliage beneath it and stays, so it
+is still flagged. The envelope comes from where conductor returns
+actually are and is capped at the grow-in zone, so tall trees beside the
+line keep their tops for the fall-in test. Cells emptied by the removal
+are treated as unobserved, not bare ground.
+
 **Fall-in uses 3D geometry and terrain.** A tree pivoting at its base
 sweeps a sphere of radius *h*. It can strike if the 3D distance from its
 base to the nearest conductor point (DTM at the tree, modelled conductor
-elevation, outer phases 5.5 m from the centreline) is ≤ *h*. Trees
-inside the under-line zone count as grow-in, not strike, so nothing is
-double-counted.
+elevation, measured outer-phase offset) is ≤ *h*. Trees inside the
+grow-in zone count as grow-in, not strike.
 
-**Only consensus vegetation enters the canopy model.** At the real class
-mix, the prior-corrected classifier rarely predicts wire. Building the
-canopy height model from its argmax alone would let conductor returns
-over trees set the canopy height to the conductor’s height, giving zero
-clearance by construction. So the canopy height model uses only points
-that both the model and the rules call vegetation.
+**Structures are masked.** Towers, H-frames and crossarms otherwise look
+like tall trees under the conductors. Cells within a structure-sized
+radius of OSM structure nodes and line vertices (for every circuit in
+the corridor) are treated as unobserved, and features one or two cells
+wide are removed with a 3×3 crown-support filter.
 
-**Structures are masked.** H-frames and crossarms otherwise appear as 18
-m “trees” right under the conductors. Cells within 8 m of OSM structure
-nodes and the line’s vertices are treated as unobserved. OSM mappers put
-a node at each structure, and here they match the H-frames visible in
-the point cloud. Features one or two cells wide are removed with a 3×3
-crown-support filter.
+## Case study 1: Sunshine Canyon, Colorado
 
-![Conductor profile](reference/figures/conductor_profile.png)
+![Sunshine conductor
+profile](reference/figures/sunshine_conductor_profile.png)
 
-Conductor profile
+Sunshine conductor profile
 
-## Results
-
-**Classifier.** These are spatially blocked CV results, scored against
-weak labels at site prevalence:
-
-| class | n | prevalence | avg. precision (spatial) | avg. precision (random folds) | avg. precision (spatial, no height/echo) |
-|----|---:|---:|---:|---:|---:|
-| vegetation | 2,144,780 | 0.997 | 0.999 | 0.999 | 0.999 |
-| building | 3,608 | 0.0017 | 0.67 | 0.85 | 0.71 |
-| structure | 1,602 | 0.0007 | 0.025 | 0.44 | 0.007 |
-| wire | 920 | 0.0004 | 0.008 | 0.20 | 0.011 |
-
-![Cross-validation](reference/figures/cv_metrics.png)
-
-Cross-validation
-
-- **Buildings transfer across space.** Average precision is 0.67,
-  against a no-skill value of 0.0017.
-- **Wires and structures don’t.** Random-fold CV makes them look
-  learnable (average precision 0.20 and 0.44), but under spatial
-  blocking they drop to 0.008 and 0.025: some lift over prevalence,
-  nothing usable. Wire and structure labels occur in only 3 of the 5
-  spatial folds, which is effectively a handful of spans and five
-  structures.
-- **Random CV on point clouds would have produced a misleading model
-  card.** That is the main methodological result here.
-
-**Corridor.** The honest answer is that public data can’t decide grow-in
-on this line:
+**The conductor is barely sampled.** After the sanity checks, conductor
+returns survive along 2% of the line, and spans run 257–468 m between
+H-frames across a 250 m descent into the canyon. Along 22% of the line
+the next support is outside the data, so there is no upper bound at all.
 
 |  | optimistic conductor (upper bound) | pessimistic conductor (code minimum) |
 |----|----|----|
-| segments with ≥ 5 m² of canopy in the clearance envelope | **0 of 29** | **28 of 29** |
-| potential strike trees | 0 | 288 |
+| segments with ≥ 5 m² of canopy in the clearance envelope | **3 of 30** | 28 of 30 |
+| potential strike trees | 19 | 307 |
 
-- **Conductor returns are scarce.** After the sanity checks, they
-  survive along only 1% of the line; the 2020 acquisition rarely sampled
-  the conductors mid-span.
-- **Spans are long.** The supports are 257–468 m apart, so the conductor
-  could be anywhere in a band tens of metres tall (see the profile
-  above).
-- **Every segment is `bound-dependent`.** The ranking by pessimistic
-  encroachment (`segments.csv`) is a “where to look first” list, not a
-  finding. The top two segments (1.06–1.16 km along the line) are tall
-  riparian stands on the canyon floor, beneath the longest span.
-- **An earlier version said otherwise.** It reported 3 “robust” grow-in
-  segments. Review traced them to guy-wire returns read as conductor and
-  to a span-length assumption the line violates. Both are fixed and
-  covered by tests.
+- **3 robust grow-in candidates.** The top one (about 1.01–1.06 km along
+  the line, conductor measured along 41% of it) has a conductor about 15
+  m up, leaving a low H-frame on the canyon floor, beside riparian
+  cottonwoods up to 27 m tall. The other two have trees of 20–29 m that
+  exceed even the highest plausible conductor. They are the places to
+  verify with imagery or a field visit first.
+- **27 segments are bound-dependent.** Whether they need work depends on
+  where the conductor actually is, which this acquisition doesn’t show.
 
-**What would turn this into a decision:** structure attachment heights,
-or the utility’s sag-and-tension model (e.g. PLS-CADD), would collapse
-the band to a single line. So would a LiDAR flight planned to capture
-conductors. Everything downstream (clearances, 3D strike geometry,
-segment ranking) already takes a conductor profile as input.
+| class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
+|----|---:|---:|---:|---:|---:|
+| building | 3,608 | 0.0016 | 0.36 | 0.85 | 0.51 |
+| structure | 1,602 | 0.0007 | 0.012 | 0.41 | 0.011 |
+| wire | 914 | 0.0004 | 0.004 | 0.22 | 0.005 |
 
-![Cross-section](reference/figures/cross_section.png)
+With only a few hundred metres of labelled conductor and five
+structures, wires and structures don’t generalise across space here.
+Random folds would have hidden that.
 
-Cross-section
+![Sunshine cross-section](reference/figures/sunshine_cross_section.png)
+
+Sunshine cross-section
+
+## Case study 2: West Nashville, Tennessee
+
+![Nashville conductor
+profile](reference/figures/nashville_conductor_profile.png)
+
+Nashville conductor profile
+
+**The conductor is measured along the whole line.** The 500 kV bundles
+were well sampled: 104,650 conductor returns, three phases at about −12,
+0 and +12 m, and a second circuit sharing the right-of-way at +30–45 m.
+The profile shows clean catenaries between towers, about 15–45 m above
+the ground (median 24 m).
+
+**Classifier against weak labels (spatial blocks):**
+
+| class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
+|----|---:|---:|---:|---:|---:|
+| wire | 104,650 | 0.10 | **0.88** | 0.94 | 0.83 |
+| structure | 4,262 | 0.004 | 0.03 | 0.26 | 0.02 |
+
+![Nashville
+cross-validation](reference/figures/nashville_cv_metrics.png)
+
+Nashville cross-validation
+
+Wires transfer across space here: average precision 0.88 against a
+no-skill 0.10, and 0.83 even without the height and echo features that
+encode the labelling rule. Structures (31 lattice towers) still don’t.
+
+**Against the vendor’s classes.** These are independent of the weak
+labels. A geometric conductor zone (inside the measured conductor
+envelope, within 3 m of the conductor or above) is excluded from scoring
+for every method alike, because the vendor put conductors in vegetation.
+Vegetation is 98.5% of the scored points, so its F1 can’t show skill:
+predicting “vegetation” everywhere scores 0.993.
+
+|  | vegetation F1 | building F1 | balanced accuracy | Cohen’s κ |
+|----|---:|---:|---:|---:|
+| always “vegetation” (baseline) | 0.993 | 0 | 0.50 | 0 |
+| weak labels | 0.948 | 0 | 0.46 | −0.01 |
+| model trained on weak labels | 0.955 | 0 | 0.46 | −0.01 |
+| Colorado model, transferred | 0.993 | 0 | 0.50 | 0.00 |
+| **trained on vendor labels (spatial CV)** | 0.998 | **0.87** (AP 0.95) | 0.89 | — |
+
+- **On vegetation vs building, the weak-label pipeline has no skill at
+  this site.** OSM maps one building in the corridor, so there are no
+  building labels to learn from. The vendor’s labels would buy a
+  building F1 of 0.87. The weak models’ lower vegetation recall is
+  mostly second-circuit conductors and abstentions, which the vendor
+  also calls vegetation.
+- **The Colorado model doesn’t transfer.** With its own class prior it
+  recalls 0% of Nashville’s conductor returns. Threshold-free, its wire
+  average precision is 0.22 against a 0.10 baseline (the Nashville
+  model: 0.87). Its 0.993 vegetation F1 is exactly the baseline.
+
+**Risk screen.** The same segments, with three different canopy models:
+
+| canopy model | grow-in | fall-in | clear |
+|----|---:|---:|---:|
+| vendor vegetation classes, as delivered | 39 | 0 | 0 |
+| vendor vegetation + this package’s conductor removal | 0 | 10 | 29 |
+| **this package** (consensus vegetation + conductor removal) | **0** | **7** | **32** |
+
+- **The delivered classes would send crews to every span.** Removing
+  conductor returns is the whole grow-in correction (39 → 0). Consensus
+  labelling (model and weak rules agreeing on vegetation, vendor
+  buildings removed) then trims fall-in from 10 segments to 7.
+- **No grow-in.** The managed right-of-way is clear under the
+  conductors.
+- **24 strike trees across 7 segments,** 28–39 m from the centreline,
+  the same under both bounds because the conductor is measured. They are
+  the list to verify.
+- **The conductor envelope has to cover every phase.** An earlier run
+  capped it at 15 m while one outer phase sits up to ~19 m from the OSM
+  centreline. That left outer-phase returns in the canopy model, which
+  showed up as 2 grow-in segments and 4 extra strike trees at the
+  envelope edge. Widening the grow-in zone to 21 m removed all of them.
+
+![Nashville
+cross-section](reference/figures/nashville_cross_section.png)
+
+Nashville cross-section
 
 ## Limitations
 
-- **Weak labels.** Every accuracy number above measures agreement with
-  the labelling rules, not ground truth. The next step is a few hundred
-  hand-labelled points in held-out blocks (e.g. in CloudCompare) for a
-  true test set.
-- **Sparse conductor sampling.** This 2020 acquisition rarely returned
-  the conductors mid-span, so the conductor is bounded, not measured
-  (see above).
-- **Bounds rest on assumptions.** Attachments are taken as ≤ 20 m above
-  ground, and every support is assumed to be an OSM vertex. A taller
-  structure, or an unmapped intermediate structure, would invalidate the
-  upper bound locally.
-- **OSM geometry.** The centreline is digitised by volunteers. Detected
-  conductor returns sit a median 4.9 m from it, consistent with ±5 m
-  phase spacing plus 1–2 m of digitising error. Structures that aren’t
-  OSM vertices are not masked.
-- **The structure mask** hides canopy within 8 m of each support, so
-  strike trees right beside structures are not scored.
+- **Weak labels.** Wire and structure accuracy is agreement with the
+  labelling rules. Nashville’s vendor classes give real ground truth for
+  vegetation and buildings only, and they themselves misclassify
+  conductors. A hand-labelled test set (e.g. in CloudCompare) is the
+  next step.
+- **Bounds rest on assumptions.** Attachment heights are capped (20 m
+  for the H-frames, 45 m for the lattice towers), and every support is
+  assumed to be an OSM vertex or tagged node. A taller or unmapped
+  structure would invalidate the upper bound locally.
+- **Conductor removal is a judgement.** Canopy within ~1.5 m beneath a
+  conductor can’t be told apart from a conductor over dense canopy; both
+  are kept as canopy and flagged as grow-in, which is the conservative
+  choice.
+- **Second circuits** are labelled and their towers masked, but only the
+  study line gets a conductor profile; second-circuit returns over
+  canopy can remain in the canopy model beyond the study line’s
+  envelope.
+- **OSM geometry** is volunteer-digitised. Conductor envelopes are sized
+  from where returns actually are, not from the centreline alone.
+- **The structure mask** hides canopy close to each support, so strike
+  trees right beside structures are not scored.
 - **Treetops from a CHM** (local maxima, 5 m window) merge or split
-  crowns in dense stands. Individual-tree segmentation would sharpen the
-  strike-tree counts.
-- **Vertical units** are assumed to match horizontal units. That holds
-  for this UTM/NAVD88-metre delivery, but some state-plane products mix
-  feet and metres.
-- **A single line and a single acquisition.** Spatial CV tests transfer
-  to other spans of the same line, not to other lines, regions or
-  sensors.
+  crowns in dense stands.
+- **Vertical units** are assumed to match horizontal units (true for
+  both deliveries: metres/metres and US survey feet/US survey feet).
 
 ## Reproduce
 
@@ -248,20 +331,25 @@ install.packages(c("lidR", "sf", "terra", "lwgeom", "ranger", "FNN", "data.table
 ```
 
 ``` bash
-Rscript analysis/run_sunshine_canyon.R   # downloads ~0.6 GB of 3DEP LiDAR on first run; ~4 min after that
+Rscript analysis/run_sunshine_canyon.R   # ~0.6 GB of 3DEP LiDAR on first run
+Rscript analysis/run_nashville.R         # ~0.3 GB; uses the Colorado model for the transfer test
 Rscript -e 'devtools::test()'           # unit tests: synthetic geometry + lidR example data, no network
 ```
 
-The OSM layers used in the case study are cached in
-`data-raw/*.geojson`, so reruns are reproducible even if OSM changes.
-Outputs go to `output/`: `segments.gpkg`, `trees.gpkg`, `segments.csv`,
-`conductor_profile.csv` and `cv_metrics.csv`.
+Cross-validation is the slow part (minutes on mains power, much longer
+on battery). Set `VEGRISK_REUSE=1` to reuse a site’s saved model and
+validation results and recompute only labels and risk. The OSM layers
+used are cached in `data-raw/<site>/*.geojson`, so reruns are
+reproducible even if OSM changes. Outputs go to `output/<site>/`:
+`segments.gpkg`, `trees.gpkg`, `segments.csv`, `conductor_profile.csv`,
+`cv_metrics.csv`, `summary.rds`.
 
 ## Data
 
-- **LiDAR:** U.S. Geological Survey 3D Elevation Program,
-  `CO_DRCOG_2020_B20` tiles `w0472n4429` and `w0472n4430`, public
-  domain.
+- **LiDAR:** U.S. Geological Survey 3D Elevation Program, public domain:
+  `CO_DRCOG_2020_B20` tiles `w0472n4429`, `w0472n4430`;
+  `TN_DavidsonCounty_D22` tiles `155020`, `155060`, `155100`, `155140`,
+  `169020`.
 - **Power lines, structures, buildings:** © OpenStreetMap contributors,
   ODbL.
 
@@ -307,6 +395,8 @@ Outputs go to `output/`: `segments.gpkg`, `trees.gpkg`, `segments.csv`,
   : Cross-validate the point classifier: spatial blocks vs random folds
 - [`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md)
   : Prior-corrected class probabilities
+- [`evaluate_vendor_classes()`](https://mjorden.github.io/powerline-veg-risk/reference/evaluate_vendor_classes.md)
+  : Score labels against vendor-delivered ASPRS classes
 - [`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md)
   : Classify all featurised points
 
