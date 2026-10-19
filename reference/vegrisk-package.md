@@ -7,7 +7,9 @@ height-normalises it, trains a random-forest point classifier on local
 geometric (eigenvalue) features with spatially blocked cross-validation,
 and summarises grow-in and fall-in ("strike tree") risk per line
 segment. Optionally ranks the dry-season greenness (NDVI) and moisture
-(NDMI) of grown-in canopy from Landsat Collection 2 surface reflectance.
+(NDMI) of grown-in canopy from Landsat Collection 2 surface reflectance,
+and which strike trees historical fire-weather winds (ERA5) and the
+National Weather Service forecast would throw into the line.
 
 ## See also
 

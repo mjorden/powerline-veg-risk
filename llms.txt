@@ -83,7 +83,8 @@ Nashville risk map
 | Classifier and validation | [`train_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/train_point_classifier.md), [`cv_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/cv_point_classifier.md), [`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md), [`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md), [`evaluate_vendor_classes()`](https://mjorden.github.io/powerline-veg-risk/reference/evaluate_vendor_classes.md) | [R/classify.R](https://mjorden.github.io/powerline-veg-risk/R/classify.R) |
 | Conductor model and risk | [`conductor_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/conductor_profile.md), [`corridor_rasters()`](https://mjorden.github.io/powerline-veg-risk/reference/corridor_rasters.md), [`assess_risk()`](https://mjorden.github.io/powerline-veg-risk/reference/assess_risk.md) | [R/risk.R](https://mjorden.github.io/powerline-veg-risk/R/risk.R) |
 | Dry-season canopy greenness and moisture (optional) | [`landsat_scenes()`](https://mjorden.github.io/powerline-veg-risk/reference/landsat_scenes.md), [`landsat_composite()`](https://mjorden.github.io/powerline-veg-risk/reference/landsat_composite.md), [`canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/canopy_dryness.md) | [R/landsat.R](https://mjorden.github.io/powerline-veg-risk/R/landsat.R) |
-| Figures | [`plot_risk_map()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.md), [`plot_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_profile.md), [`plot_cross_section()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cross_section.md), [`plot_cv()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cv.md), [`plot_importance()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_importance.md), [`plot_canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_canopy_dryness.md) | [R/plot.R](https://mjorden.github.io/powerline-veg-risk/R/plot.R) |
+| Fire-weather wind: windward strike trees, forecast watchlist (optional) | [`wind_history()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_history.md), [`fire_wind_hours()`](https://mjorden.github.io/powerline-veg-risk/reference/fire_wind_hours.md), [`wind_fall_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_fall_exposure.md), [`nws_forecast()`](https://mjorden.github.io/powerline-veg-risk/reference/nws_forecast.md), [`nws_alerts()`](https://mjorden.github.io/powerline-veg-risk/reference/nws_alerts.md), [`forecast_watchlist()`](https://mjorden.github.io/powerline-veg-risk/reference/forecast_watchlist.md) | [R/wind.R](https://mjorden.github.io/powerline-veg-risk/R/wind.R) |
+| Figures | [`plot_risk_map()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.md), [`plot_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_profile.md), [`plot_cross_section()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cross_section.md), [`plot_cv()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cv.md), [`plot_importance()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_importance.md), [`plot_canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_canopy_dryness.md), [`plot_wind_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_wind_exposure.md) | [R/plot.R](https://mjorden.github.io/powerline-veg-risk/R/plot.R) |
 | Case studies | `run_case_study(cfg)` + one config script per site | [analysis/](https://mjorden.github.io/powerline-veg-risk/analysis/) |
 
 ## Design decisions worth reading
@@ -198,6 +199,32 @@ optional Landsat step adds that:
   grown in under the optimistic conductor bound; `dry_grow_in_lo` uses
   the pessimistic tier.
 
+**Weather can’t tell segments apart, but wind direction can.**
+Fire-weather grids are 2.5–25 km wide, so every segment of a short line
+gets the same wind. The spatial signal comes from combining wind
+*direction* with where each strike tree stands. Windthrown trees fall
+roughly downwind, so a tree on the upwind side of the line in dry,
+high-wind hours matters more than the same tree on the downwind side.
+
+- **Fire-weather hours:** ten years of hourly ERA5 reanalysis
+  (Open-Meteo, no key). Hours count as fire weather when gusts are in
+  the record’s top 5% and relative humidity is ≤ 30%.
+- **Hitting arc, from the existing reach test.** A tree of height *h*,
+  with its base a horizontal distance *d* from the outer phase and the
+  conductor *dz* above its base, reaches horizontally *R* = √(*h*² −
+  *dz*²) at conductor height. It hits if it falls within acos(*d*/*R*)
+  of straight at the line. There is no arbitrary angle cutoff, apart
+  from a ±15° allowance for the scatter of real fall directions.
+- **Per tree:** the share of fire-weather hours whose wind would throw
+  it into that arc (`wind_hit_lo` / `wind_hit_hi`). **Per segment:** the
+  windward strike-tree count, and the expected number thrown towards the
+  line in a fire-weather hour. Wind directions are rotated from true to
+  grid north first.
+- **Forecast watchlist:** `analysis/watchlist.R` applies the same
+  thresholds and geometry to the live NWS 7-day hourly forecast and
+  active Red Flag Warnings. It lists the segments whose strike trees the
+  coming winds would throw, plus dry grown-in segments, and when.
+
 ## Case study 1: Sunshine Canyon, Colorado
 
 ![Sunshine conductor
@@ -263,6 +290,31 @@ NDVI and NDMI agree closely across them (r = 0.89).
 dryness](reference/figures/sunshine_canopy_dryness.png)
 
 Sunshine canopy dryness
+
+**Fire-weather winds come from one direction, and that splits the strike
+trees in two.** Over 2015–2024 there were 609 fire-weather hours (gusts
+≥ 15.2 m/s, RH ≤ 30%), two-thirds of them in October–December. 94% came
+from the west: the Front Range downslope winds behind the 2021 Marshall
+Fire. The line runs south-west to north-east, so those winds blow trees
+west of it towards the conductors and trees east of it away.
+
+|  | potential strike trees | windward (≥ 50% of fire-weather hours) | expected thrown towards the line per fire-weather hour |
+|----|---:|---:|---:|
+| pessimistic conductor (code minimum) | 307 | 126 | 127 |
+| optimistic conductor (upper bound) | 19 | 10 | 10 |
+
+- **The split is close to all-or-nothing.** Windward trees are hit in
+  95% of fire-weather hours on average; the median leeward tree is hit
+  in 1%.
+- **Under the optimistic bound, the top grow-in candidate also has the
+  most windward strike trees:** 7 of its 13, at 1.01–1.06 km. It is the
+  segment to verify first on both counts.
+- **The dry segment at 1.32–1.37 km** (lowest NDVI on the line) has 9
+  strike trees under the pessimistic bound, all windward.
+
+![Sunshine wind exposure](reference/figures/sunshine_wind_exposure.png)
+
+Sunshine wind exposure
 
 ## Case study 2: West Nashville, Tennessee
 
@@ -379,6 +431,13 @@ Nashville cross-section
   mixes the right-of-way with its edges. `dry_canopy` ranks segments
   within one corridor and one composite. It can’t be compared across
   sites or seasons, and it is not a fire-danger rating.
+- **Reanalysis wind is regional.** ERA5 resolves the synoptic flow at
+  10–25 km, not channelling along a canyon or speed-up over a ridge, and
+  its gusts are a model diagnostic. The watchlist applies thresholds
+  from that record to NWS forecast gusts, which are a different product,
+  so treat the gust threshold as a starting point to tune per site.
+  Trees are assumed to fall downwind, within ±15°; trees that break or
+  lean, or limbs, can do otherwise.
 
 ## Reproduce
 
@@ -392,6 +451,7 @@ install.packages(c("lidR", "sf", "terra", "lwgeom", "ranger", "FNN", "data.table
 ``` bash
 Rscript analysis/run_sunshine_canyon.R   # ~0.6 GB of 3DEP LiDAR on first run
 Rscript analysis/run_nashville.R         # ~0.3 GB; uses the Colorado model for the transfer test
+Rscript analysis/watchlist.R sunshine    # live NWS forecast against a finished run (needs `wind` in the config)
 Rscript -e 'devtools::test()'           # unit tests: synthetic geometry + lidR example data, no network
 ```
 
@@ -404,6 +464,8 @@ reproducible even if OSM changes. Outputs go to `output/<site>/`:
 `cv_metrics.csv`, `summary.rds`. A site config with
 `landsat = list(years, months)` also writes `landsat_composite.tif` and
 `landsat_scenes.csv`; the composite is cached and reused on reruns.
+`wind = list(start, end)` writes and reuses `wind_hourly.csv`; the
+watchlist writes `watchlist.csv`.
 
 ## Data
 
@@ -416,6 +478,11 @@ reproducible even if OSM changes. Outputs go to `output/<site>/`:
 - **Landsat:** U.S. Geological Survey Landsat 8–9 Collection 2 Level-2
   surface reflectance, public domain, accessed through the Microsoft
   Planetary Computer.
+- **Historical wind:** Copernicus ERA5 reanalysis via the
+  [Open-Meteo](https://open-meteo.com/) historical weather API, CC BY
+  4.0.
+- **Forecasts and alerts:** U.S. National Weather Service API
+  (api.weather.gov), public domain.
 
 # Package index
 
@@ -486,6 +553,21 @@ reproducible even if OSM changes. Outputs go to `output/<site>/`:
 - [`canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/canopy_dryness.md)
   : Dry-season greenness and moisture of grown-in canopy, per segment
 
+## Fire-weather wind
+
+- [`wind_history()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_history.md)
+  : Hourly historical wind and humidity for a corridor
+- [`fire_wind_hours()`](https://mjorden.github.io/powerline-veg-risk/reference/fire_wind_hours.md)
+  : Select dry, high-wind ("fire-weather") hours
+- [`wind_fall_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_fall_exposure.md)
+  : Which strike trees the fire-weather winds would throw into the line
+- [`nws_forecast()`](https://mjorden.github.io/powerline-veg-risk/reference/nws_forecast.md)
+  : Hourly National Weather Service forecast for a corridor
+- [`nws_alerts()`](https://mjorden.github.io/powerline-veg-risk/reference/nws_alerts.md)
+  : Active NWS watches, warnings and advisories at a corridor
+- [`forecast_watchlist()`](https://mjorden.github.io/powerline-veg-risk/reference/forecast_watchlist.md)
+  : Segments to watch under the coming fire weather
+
 ## Figures
 
 - [`plot_canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_canopy_dryness.md)
@@ -500,4 +582,6 @@ reproducible even if OSM changes. Outputs go to `output/<site>/`:
   : Ground and conductor profile along the line
 - [`plot_risk_map()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.md)
   : Map of canopy height, segment priority, and strike trees
+- [`plot_wind_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_wind_exposure.md)
+  : Strike trees the fire-weather winds would throw into the line
 

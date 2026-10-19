@@ -13,12 +13,16 @@
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/cv_point_classifier.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/download_tiles.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/evaluate_vendor_classes.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/fire_wind_hours.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/forecast_watchlist.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/index.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/landsat_composite.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/landsat_scenes.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/las_m_per_unit.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/line_corridor.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/line_vertex_points.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/nws_alerts.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/nws_forecast.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/osm_buildings.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/osm_power_lines.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/osm_power_structures.html</loc></url>
@@ -28,6 +32,7 @@
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_importance.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_profile.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_wind_exposure.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/point_features.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/predict_points.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/qa_clear.html</loc></url>
@@ -38,5 +43,7 @@
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/train_point_classifier.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/vegrisk-package.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/weak_labels.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/wind_fall_exposure.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/wind_history.html</loc></url>
 </urlset>
 

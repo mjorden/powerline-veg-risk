@@ -67,6 +67,21 @@
 - [`canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/canopy_dryness.md)
   : Dry-season greenness and moisture of grown-in canopy, per segment
 
+## Fire-weather wind
+
+- [`wind_history()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_history.md)
+  : Hourly historical wind and humidity for a corridor
+- [`fire_wind_hours()`](https://mjorden.github.io/powerline-veg-risk/reference/fire_wind_hours.md)
+  : Select dry, high-wind ("fire-weather") hours
+- [`wind_fall_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_fall_exposure.md)
+  : Which strike trees the fire-weather winds would throw into the line
+- [`nws_forecast()`](https://mjorden.github.io/powerline-veg-risk/reference/nws_forecast.md)
+  : Hourly National Weather Service forecast for a corridor
+- [`nws_alerts()`](https://mjorden.github.io/powerline-veg-risk/reference/nws_alerts.md)
+  : Active NWS watches, warnings and advisories at a corridor
+- [`forecast_watchlist()`](https://mjorden.github.io/powerline-veg-risk/reference/forecast_watchlist.md)
+  : Segments to watch under the coming fire weather
+
 ## Figures
 
 - [`plot_canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_canopy_dryness.md)
@@ -81,3 +96,5 @@
   : Ground and conductor profile along the line
 - [`plot_risk_map()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.md)
   : Map of canopy height, segment priority, and strike trees
+- [`plot_wind_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_wind_exposure.md)
+  : Strike trees the fire-weather winds would throw into the line
