@@ -82,7 +82,8 @@ Nashville risk map
 | Weak labels | [`weak_labels()`](https://mjorden.github.io/powerline-veg-risk/reference/weak_labels.md) | [R/labels.R](https://mjorden.github.io/powerline-veg-risk/R/labels.R) |
 | Classifier and validation | [`train_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/train_point_classifier.md), [`cv_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/cv_point_classifier.md), [`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md), [`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md), [`evaluate_vendor_classes()`](https://mjorden.github.io/powerline-veg-risk/reference/evaluate_vendor_classes.md) | [R/classify.R](https://mjorden.github.io/powerline-veg-risk/R/classify.R) |
 | Conductor model and risk | [`conductor_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/conductor_profile.md), [`corridor_rasters()`](https://mjorden.github.io/powerline-veg-risk/reference/corridor_rasters.md), [`assess_risk()`](https://mjorden.github.io/powerline-veg-risk/reference/assess_risk.md) | [R/risk.R](https://mjorden.github.io/powerline-veg-risk/R/risk.R) |
-| Figures | [`plot_risk_map()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.md), [`plot_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_profile.md), [`plot_cross_section()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cross_section.md), [`plot_cv()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cv.md), [`plot_importance()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_importance.md) | [R/plot.R](https://mjorden.github.io/powerline-veg-risk/R/plot.R) |
+| Dry-season canopy greenness and moisture (optional) | [`landsat_scenes()`](https://mjorden.github.io/powerline-veg-risk/reference/landsat_scenes.md), [`landsat_composite()`](https://mjorden.github.io/powerline-veg-risk/reference/landsat_composite.md), [`canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/canopy_dryness.md) | [R/landsat.R](https://mjorden.github.io/powerline-veg-risk/R/landsat.R) |
+| Figures | [`plot_risk_map()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.md), [`plot_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_profile.md), [`plot_cross_section()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cross_section.md), [`plot_cv()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cv.md), [`plot_importance()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_importance.md), [`plot_canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_canopy_dryness.md) | [R/plot.R](https://mjorden.github.io/powerline-veg-risk/R/plot.R) |
 | Case studies | `run_case_study(cfg)` + one config script per site | [analysis/](https://mjorden.github.io/powerline-veg-risk/analysis/) |
 
 ## Design decisions worth reading
@@ -170,6 +171,33 @@ radius of OSM structure nodes and line vertices (for every circuit in
 the corridor) are treated as unobserved, and features one or two cells
 wide are removed with a 3×3 crown-support filter.
 
+**LiDAR says where canopy has grown in; Landsat says how green and wet
+it is.** The grow-in screen ranks canopy by its distance to the
+conductor, not by how readily it would carry fire to the line. An
+optional Landsat step adds that:
+
+- **Data:** Landsat 8/9 Collection 2 Level-2 surface reflectance, from
+  the Microsoft Planetary Computer STAC API (no key needed). Only the
+  corridor window of each cloud-optimised GeoTIFF is read.
+- **Composite:** a per-pixel median over every clear dry-season
+  observation in the chosen years. `QA_PIXEL` masks fill, cloud, dilated
+  cloud, cirrus, shadow, snow and water. Water is masked because its
+  negative NDVI would read as very dry canopy. Two indices come out:
+  **NDVI** (greenness) and **NDMI** (NIR against SWIR1: canopy water
+  content, the closer of the two to fuel moisture).
+- **LiDAR picks the pixels.** A 30 m pixel is wider than many
+  rights-of-way, so most pixels mix trees with cleared ground. Each
+  pixel gets a canopy fraction from the 1 m CHM, and pixels under 50%
+  canopy are not scored. A segment’s value is the mean of its pixels,
+  weighted by how many of the segment’s canopy cells *inside the grow-in
+  zone* fall in each one. It describes the trees under the wires, not
+  the forest beside them.
+- **Relative, not absolute.** Neither index has a fire-danger threshold.
+  Each segment is ranked against every canopy pixel in the corridor, and
+  `dry_canopy` marks the lowest quarter. `dry_grow_in` is dry *and*
+  grown in under the optimistic conductor bound; `dry_grow_in_lo` uses
+  the pessimistic tier.
+
 ## Case study 1: Sunshine Canyon, Colorado
 
 ![Sunshine conductor
@@ -209,6 +237,32 @@ Random folds would have hidden that.
 ![Sunshine cross-section](reference/figures/sunshine_cross_section.png)
 
 Sunshine cross-section
+
+**The grown-in canopy is not the dry canopy.** A dry-season
+(July–September) median of 25 Landsat 8 scenes from 2019–2021,
+bracketing the 2020 flight, gives 141 canopy-dominated 30 m pixels in
+the corridor. 23 of the 30 segments have enough grown-in canopy to rank;
+NDVI and NDMI agree closely across them (r = 0.89).
+
+| robust grow-in candidate | NDVI percentile | NDMI percentile |
+|----|---:|---:|
+| 0.10–0.15 km, trees to 20 m | 0.36 | 0.49 |
+| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 0.50 | 0.81 |
+| 1.06–1.11 km, canyon floor, trees to 29 m | 0.89 | 0.96 |
+
+- **None of the 3 robust grow-in candidates is dry.** The two worst
+  encroachments are among the wettest canopy on the line: riparian trees
+  on the canyon floor.
+- **The 5 driest segments** (lowest NDVI quarter; 0.05–0.10, 0.46–0.51,
+  0.81–0.86 and 1.32–1.42 km) are all bound-dependent: grow-in only if
+  the conductor is at the code minimum. If the conductor turns out to be
+  low there, encroachment and dry fuel coincide, so these come first
+  among the 27 undecidable segments.
+
+![Sunshine canopy
+dryness](reference/figures/sunshine_canopy_dryness.png)
+
+Sunshine canopy dryness
 
 ## Case study 2: West Nashville, Tennessee
 
@@ -320,6 +374,11 @@ Nashville cross-section
   crowns in dense stands.
 - **Vertical units** are assumed to match horizontal units (true for
   both deliveries: metres/metres and US survey feet/US survey feet).
+- **Landsat greenness is not fuel moisture.** Low NDVI over canopy can
+  also mean thin, trimmed or leaf-off crowns, and a 30 m pixel always
+  mixes the right-of-way with its edges. `dry_canopy` ranks segments
+  within one corridor and one composite. It can’t be compared across
+  sites or seasons, and it is not a fire-danger rating.
 
 ## Reproduce
 
@@ -342,7 +401,9 @@ validation results and recompute only labels and risk. The OSM layers
 used are cached in `data-raw/<site>/*.geojson`, so reruns are
 reproducible even if OSM changes. Outputs go to `output/<site>/`:
 `segments.gpkg`, `trees.gpkg`, `segments.csv`, `conductor_profile.csv`,
-`cv_metrics.csv`, `summary.rds`.
+`cv_metrics.csv`, `summary.rds`. A site config with
+`landsat = list(years, months)` also writes `landsat_composite.tif` and
+`landsat_scenes.csv`; the composite is cached and reused on reruns.
 
 ## Data
 
@@ -352,3 +413,6 @@ reproducible even if OSM changes. Outputs go to `output/<site>/`:
   `169020`.
 - **Power lines, structures, buildings:** © OpenStreetMap contributors,
   ODbL.
+- **Landsat:** U.S. Geological Survey Landsat 8–9 Collection 2 Level-2
+  surface reflectance, public domain, accessed through the Microsoft
+  Planetary Computer.

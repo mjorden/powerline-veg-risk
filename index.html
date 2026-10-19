@@ -11,8 +11,8 @@
 <script src="deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
 <script src="deps/headroom-0.11.0/headroom.min.js"></script><script src="deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="deps/search-1.0.0/fuse.min.js"></script><script src="deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="pkgdown.js"></script><meta property="og:title" content="LiDAR Vegetation Encroachment and Fall-In Risk for Power Line Corridors">
-<meta name="description" content='Builds a vegetation-risk screen for overhead power lines from public data: USGS 3DEP airborne LiDAR (LAS/LAZ) and OpenStreetMap transmission-line geometry. Clips the point cloud to a line corridor, height-normalises it, trains a random-forest point classifier on local geometric (eigenvalue) features with spatially blocked cross-validation, and summarises grow-in and fall-in ("strike tree") risk per line segment.'>
-<meta property="og:description" content='Builds a vegetation-risk screen for overhead power lines from public data: USGS 3DEP airborne LiDAR (LAS/LAZ) and OpenStreetMap transmission-line geometry. Clips the point cloud to a line corridor, height-normalises it, trains a random-forest point classifier on local geometric (eigenvalue) features with spatially blocked cross-validation, and summarises grow-in and fall-in ("strike tree") risk per line segment.'>
+<meta name="description" content='Builds a vegetation-risk screen for overhead power lines from public data: USGS 3DEP airborne LiDAR (LAS/LAZ) and OpenStreetMap transmission-line geometry. Clips the point cloud to a line corridor, height-normalises it, trains a random-forest point classifier on local geometric (eigenvalue) features with spatially blocked cross-validation, and summarises grow-in and fall-in ("strike tree") risk per line segment. Optionally ranks the dry-season greenness (NDVI) and moisture (NDMI) of grown-in canopy from Landsat Collection 2 surface reflectance.'>
+<meta property="og:description" content='Builds a vegetation-risk screen for overhead power lines from public data: USGS 3DEP airborne LiDAR (LAS/LAZ) and OpenStreetMap transmission-line geometry. Clips the point cloud to a line corridor, height-normalises it, trains a random-forest point classifier on local geometric (eigenvalue) features with spatially blocked cross-validation, and summarises grow-in and fall-in ("strike tree") risk per line segment. Optionally ranks the dry-season greenness (NDVI) and moisture (NDMI) of grown-in canopy from Landsat Collection 2 surface reflectance.'>
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -205,9 +205,16 @@ OSM lines (Overpass) ─┘                │
 <td><a href="R/risk.R">R/risk.R</a></td>
 </tr>
 <tr>
+<td>Dry-season canopy greenness and moisture (optional)</td>
+<td>
+<code><a href="reference/landsat_scenes.html">landsat_scenes()</a></code>, <code><a href="reference/landsat_composite.html">landsat_composite()</a></code>, <code><a href="reference/canopy_dryness.html">canopy_dryness()</a></code>
+</td>
+<td><a href="R/landsat.R">R/landsat.R</a></td>
+</tr>
+<tr>
 <td>Figures</td>
 <td>
-<code><a href="reference/plot_risk_map.html">plot_risk_map()</a></code>, <code><a href="reference/plot_profile.html">plot_profile()</a></code>, <code><a href="reference/plot_cross_section.html">plot_cross_section()</a></code>, <code><a href="reference/plot_cv.html">plot_cv()</a></code>, <code><a href="reference/plot_importance.html">plot_importance()</a></code>
+<code><a href="reference/plot_risk_map.html">plot_risk_map()</a></code>, <code><a href="reference/plot_profile.html">plot_profile()</a></code>, <code><a href="reference/plot_cross_section.html">plot_cross_section()</a></code>, <code><a href="reference/plot_cv.html">plot_cv()</a></code>, <code><a href="reference/plot_importance.html">plot_importance()</a></code>, <code><a href="reference/plot_canopy_dryness.html">plot_canopy_dryness()</a></code>
 </td>
 <td><a href="R/plot.R">R/plot.R</a></td>
 </tr>
@@ -254,6 +261,17 @@ OSM lines (Overpass) ─┘                │
 <p>A crown that reaches wire height has foliage beneath it and stays, so it is still flagged. The envelope comes from where conductor returns actually are and is capped at the grow-in zone, so tall trees beside the line keep their tops for the fall-in test. Cells emptied by the removal are treated as unobserved, not bare ground.</p>
 <p><strong>Fall-in uses 3D geometry and terrain.</strong> A tree pivoting at its base sweeps a sphere of radius <em>h</em>. It can strike if the 3D distance from its base to the nearest conductor point (DTM at the tree, modelled conductor elevation, measured outer-phase offset) is ≤ <em>h</em>. Trees inside the grow-in zone count as grow-in, not strike.</p>
 <p><strong>Structures are masked.</strong> Towers, H-frames and crossarms otherwise look like tall trees under the conductors. Cells within a structure-sized radius of OSM structure nodes and line vertices (for every circuit in the corridor) are treated as unobserved, and features one or two cells wide are removed with a 3×3 crown-support filter.</p>
+<p><strong>LiDAR says where canopy has grown in; Landsat says how green and wet it is.</strong> The grow-in screen ranks canopy by its distance to the conductor, not by how readily it would carry fire to the line. An optional Landsat step adds that:</p>
+<ul>
+<li>
+<strong>Data:</strong> Landsat 8/9 Collection 2 Level-2 surface reflectance, from the Microsoft Planetary Computer STAC API (no key needed). Only the corridor window of each cloud-optimised GeoTIFF is read.</li>
+<li>
+<strong>Composite:</strong> a per-pixel median over every clear dry-season observation in the chosen years. <code>QA_PIXEL</code> masks fill, cloud, dilated cloud, cirrus, shadow, snow and water. Water is masked because its negative NDVI would read as very dry canopy. Two indices come out: <strong>NDVI</strong> (greenness) and <strong>NDMI</strong> (NIR against SWIR1: canopy water content, the closer of the two to fuel moisture).</li>
+<li>
+<strong>LiDAR picks the pixels.</strong> A 30 m pixel is wider than many rights-of-way, so most pixels mix trees with cleared ground. Each pixel gets a canopy fraction from the 1 m CHM, and pixels under 50% canopy are not scored. A segment’s value is the mean of its pixels, weighted by how many of the segment’s canopy cells <em>inside the grow-in zone</em> fall in each one. It describes the trees under the wires, not the forest beside them.</li>
+<li>
+<strong>Relative, not absolute.</strong> Neither index has a fire-danger threshold. Each segment is ranked against every canopy pixel in the corridor, and <code>dry_canopy</code> marks the lowest quarter. <code>dry_grow_in</code> is dry <em>and</em> grown in under the optimistic conductor bound; <code>dry_grow_in_lo</code> uses the pessimistic tier.</li>
+</ul>
 </div>
 <div class="section level2">
 <h2 id="case-study-1-sunshine-canyon-colorado">Case study 1: Sunshine Canyon, Colorado<a class="anchor" aria-label="anchor" href="#case-study-1-sunshine-canyon-colorado"></a>
@@ -339,6 +357,45 @@ OSM lines (Overpass) ─┘                │
 <p>With only a few hundred metres of labelled conductor and five structures, wires and structures don’t generalise across space here. Random folds would have hidden that.</p>
 <div class="float">
 <img src="reference/figures/sunshine_cross_section.png" alt="Sunshine cross-section"><div class="figcaption">Sunshine cross-section</div>
+</div>
+<p><strong>The grown-in canopy is not the dry canopy.</strong> A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, gives 141 canopy-dominated 30 m pixels in the corridor. 23 of the 30 segments have enough grown-in canopy to rank; NDVI and NDMI agree closely across them (r = 0.89).</p>
+<table class="table">
+<colgroup>
+<col width="27%">
+<col width="36%">
+<col width="36%">
+</colgroup>
+<thead><tr>
+<th>robust grow-in candidate</th>
+<th align="right">NDVI percentile</th>
+<th align="right">NDMI percentile</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>0.10–0.15 km, trees to 20 m</td>
+<td align="right">0.36</td>
+<td align="right">0.49</td>
+</tr>
+<tr>
+<td>1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate)</td>
+<td align="right">0.50</td>
+<td align="right">0.81</td>
+</tr>
+<tr>
+<td>1.06–1.11 km, canyon floor, trees to 29 m</td>
+<td align="right">0.89</td>
+<td align="right">0.96</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>
+<strong>None of the 3 robust grow-in candidates is dry.</strong> The two worst encroachments are among the wettest canopy on the line: riparian trees on the canyon floor.</li>
+<li>
+<strong>The 5 driest segments</strong> (lowest NDVI quarter; 0.05–0.10, 0.46–0.51, 0.81–0.86 and 1.32–1.42 km) are all bound-dependent: grow-in only if the conductor is at the code minimum. If the conductor turns out to be low there, encroachment and dry fuel coincide, so these come first among the 27 undecidable segments.</li>
+</ul>
+<div class="float">
+<img src="reference/figures/sunshine_canopy_dryness.png" alt="Sunshine canopy dryness"><div class="figcaption">Sunshine canopy dryness</div>
 </div>
 </div>
 <div class="section level2">
@@ -520,6 +577,8 @@ OSM lines (Overpass) ─┘                │
 <strong>Treetops from a CHM</strong> (local maxima, 5 m window) merge or split crowns in dense stands.</li>
 <li>
 <strong>Vertical units</strong> are assumed to match horizontal units (true for both deliveries: metres/metres and US survey feet/US survey feet).</li>
+<li>
+<strong>Landsat greenness is not fuel moisture.</strong> Low NDVI over canopy can also mean thin, trimmed or leaf-off crowns, and a 30 m pixel always mixes the right-of-way with its edges. <code>dry_canopy</code> ranks segments within one corridor and one composite. It can’t be compared across sites or seasons, and it is not a fire-danger rating.</li>
 </ul>
 </div>
 <div class="section level2">
@@ -532,7 +591,7 @@ OSM lines (Overpass) ─┘                │
 <div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="ex">Rscript</span> analysis/run_sunshine_canyon.R   <span class="co"># ~0.6 GB of 3DEP LiDAR on first run</span></span>
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a><span class="ex">Rscript</span> analysis/run_nashville.R         <span class="co"># ~0.3 GB; uses the Colorado model for the transfer test</span></span>
 <span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'devtools::test()'</span>           <span class="co"># unit tests: synthetic geometry + lidR example data, no network</span></span></code></pre></div>
-<p>Cross-validation is the slow part (minutes on mains power, much longer on battery). Set <code>VEGRISK_REUSE=1</code> to reuse a site’s saved model and validation results and recompute only labels and risk. The OSM layers used are cached in <code>data-raw/&lt;site&gt;/*.geojson</code>, so reruns are reproducible even if OSM changes. Outputs go to <code>output/&lt;site&gt;/</code>: <code>segments.gpkg</code>, <code>trees.gpkg</code>, <code>segments.csv</code>, <code>conductor_profile.csv</code>, <code>cv_metrics.csv</code>, <code>summary.rds</code>.</p>
+<p>Cross-validation is the slow part (minutes on mains power, much longer on battery). Set <code>VEGRISK_REUSE=1</code> to reuse a site’s saved model and validation results and recompute only labels and risk. The OSM layers used are cached in <code>data-raw/&lt;site&gt;/*.geojson</code>, so reruns are reproducible even if OSM changes. Outputs go to <code>output/&lt;site&gt;/</code>: <code>segments.gpkg</code>, <code>trees.gpkg</code>, <code>segments.csv</code>, <code>conductor_profile.csv</code>, <code>cv_metrics.csv</code>, <code>summary.rds</code>. A site config with <code>landsat = list(years, months)</code> also writes <code>landsat_composite.tif</code> and <code>landsat_scenes.csv</code>; the composite is cached and reused on reruns.</p>
 </div>
 <div class="section level2">
 <h2 id="data">Data<a class="anchor" aria-label="anchor" href="#data"></a>
@@ -542,6 +601,8 @@ OSM lines (Overpass) ─┘                │
 <strong>LiDAR:</strong> U.S. Geological Survey 3D Elevation Program, public domain: <code>CO_DRCOG_2020_B20</code> tiles <code>w0472n4429</code>, <code>w0472n4430</code>; <code>TN_DavidsonCounty_D22</code> tiles <code>155020</code>, <code>155060</code>, <code>155100</code>, <code>155140</code>, <code>169020</code>.</li>
 <li>
 <strong>Power lines, structures, buildings:</strong> © OpenStreetMap contributors, ODbL.</li>
+<li>
+<strong>Landsat:</strong> U.S. Geological Survey Landsat 8–9 Collection 2 Level-2 surface reflectance, public domain, accessed through the Microsoft Planetary Computer.</li>
 </ul>
 </div>
 </div>

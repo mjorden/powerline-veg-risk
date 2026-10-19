@@ -6,6 +6,7 @@
 <url><loc>https://mjorden.github.io/powerline-veg-risk/index.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/assess_risk.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/assign_blocks.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/canopy_dryness.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/conductor_profile.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/corridor_rasters.html</loc></url>
@@ -13,12 +14,15 @@
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/download_tiles.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/evaluate_vendor_classes.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/index.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/landsat_composite.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/landsat_scenes.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/las_m_per_unit.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/line_corridor.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/line_vertex_points.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/osm_buildings.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/osm_power_lines.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/osm_power_structures.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_canopy_dryness.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_cross_section.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_cv.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_importance.html</loc></url>
@@ -26,6 +30,7 @@
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/point_features.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/predict_points.html</loc></url>
+<url><loc>https://mjorden.github.io/powerline-veg-risk/reference/qa_clear.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/read_corridor.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/rule_proxy_features.html</loc></url>
 <url><loc>https://mjorden.github.io/powerline-veg-risk/reference/segment_lines.html</loc></url>

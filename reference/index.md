@@ -58,8 +58,19 @@
 - [`assess_risk()`](https://mjorden.github.io/powerline-veg-risk/reference/assess_risk.md)
   : Locate trees and score grow-in / fall-in risk per segment
 
+## Canopy greenness and moisture (Landsat)
+
+- [`landsat_scenes()`](https://mjorden.github.io/powerline-veg-risk/reference/landsat_scenes.md)
+  : Find Landsat Collection 2 Level-2 scenes over an area of interest
+- [`landsat_composite()`](https://mjorden.github.io/powerline-veg-risk/reference/landsat_composite.md)
+  : Median dry-season NDVI and NDMI composite from Landsat scenes
+- [`canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/canopy_dryness.md)
+  : Dry-season greenness and moisture of grown-in canopy, per segment
+
 ## Figures
 
+- [`plot_canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_canopy_dryness.md)
+  : Map of dry-season canopy greenness and dry grown-in segments
 - [`plot_cross_section()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cross_section.md)
   : Cross-section of classified points perpendicular to the line
 - [`plot_cv()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cv.md)
