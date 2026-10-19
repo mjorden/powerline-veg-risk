@@ -46,6 +46,14 @@ reference:
       - landsat_scenes
       - landsat_composite
       - canopy_dryness
+  - title: Fire-weather wind
+    contents:
+      - wind_history
+      - fire_wind_hours
+      - wind_fall_exposure
+      - nws_forecast
+      - nws_alerts
+      - forecast_watchlist
   - title: Figures
     contents:
       - starts_with("plot_")

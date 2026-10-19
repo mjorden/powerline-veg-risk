@@ -256,6 +256,43 @@ run_case_study <- function(cfg) {
     plot_canopy_dryness(dryness, file = fig("canopy_dryness"))
   }
 
+  # --- 6c. Fire-weather wind (optional) -----------------------------------------
+  # cfg$wind = list(start, end, gust_quantile, max_rh, spread_deg): which
+  # strike trees the dry, high-wind hours of the record would throw into the
+  # line. The hourly record is cached; analysis/watchlist.R applies the same
+  # geometry to the live NWS forecast.
+  if (!is.null(cfg$wind)) {
+    wc <- cfg$wind
+    wind_path <- file.path(out, "wind_hourly.csv")
+    if (file.exists(wind_path)) {
+      wind <- fread(wind_path)
+      wind$time <- as.POSIXct(wind$time, tz = "UTC")
+      ll <- readRDS(file.path(out, "wind_cell.rds"))
+      attr(wind, "lon") <- ll[1]
+      attr(wind, "lat") <- ll[2]
+    } else {
+      wind <- wind_history(study, wc$start, wc$end)
+      fwrite(wind, wind_path)
+      saveRDS(c(attr(wind, "lon"), attr(wind, "lat")), file.path(out, "wind_cell.rds"))
+    }
+    fw <- fire_wind_hours(wind, gust_quantile = if (is.null(wc$gust_quantile)) 0.95 else wc$gust_quantile,
+                          max_rh = if (is.null(wc$max_rh)) 30 else wc$max_rh)
+    attr(fw, "lon") <- attr(wind, "lon")
+    attr(fw, "lat") <- attr(wind, "lat")
+    risk <- wind_fall_exposure(risk, profile, fw, phase_offset_m = cfg$phase_offset_m,
+                               spread_deg = if (is.null(wc$spread_deg)) 15 else wc$spread_deg)
+    wi <- attr(risk$segments, "wind")
+    step(sprintf("wind: %d fire-weather hours of %d (gust >= %.1f m/s, RH <= %g%%); grid convergence %.2f deg",
+                 wi$n_hours, wi$n_record, wi$min_gust_ms, wi$max_rh, wi$convergence_deg))
+    for (b in c("lo", "hi")) {
+      s <- risk$trees[[paste0("strike_", b)]]
+      h <- risk$trees[[paste0("wind_hit_", b)]][s]
+      step(sprintf("  %s bound: %d strike trees, %d windward (>= %.0f%% of hours), %.1f expected per fire-weather hour",
+                   b, sum(s), sum(h >= wi$windward_min), 100 * wi$windward_min, sum(h)))
+    }
+    plot_wind_exposure(risk, rasters, bound = "lo", file = fig("wind_exposure"))
+  }
+
   st_write(risk$segments, file.path(out, "segments.gpkg"), delete_dsn = TRUE, quiet = TRUE)
   st_write(risk$trees, file.path(out, "trees.gpkg"), delete_dsn = TRUE, quiet = TRUE)
   fwrite(st_drop_geometry(risk$segments), file.path(out, "segments.csv"))
@@ -271,6 +308,11 @@ run_case_study <- function(cfg) {
                   n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi)),
                   n_conductor_excluded = rasters$n_conductor_excluded,
                   landsat = if (!is.null(dryness)) attr(dryness$segments, "landsat"),
+                  wind = if (!is.null(attr(risk$segments, "wind"))) {
+                    w <- attr(risk$segments, "wind")
+                    w$dir_from_deg <- NULL  # the hours are in wind_hourly.csv
+                    w
+                  },
                   dry_grow_in = if (!is.null(dryness)) {
                     c(hi = sum(dryness$segments$dry_grow_in, na.rm = TRUE),
                       lo = sum(dryness$segments$dry_grow_in_lo, na.rm = TRUE))

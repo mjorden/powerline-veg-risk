@@ -283,6 +283,81 @@ plot_canopy_dryness <- function(dryness, title = NULL, file = NULL) {
   save_or_return(p, file, if (tall) 9 else 8, if (tall) 10 else 9)
 }
 
+#' Strike trees the fire-weather winds would throw into the line
+#'
+#' Map of potential strike trees (under one conductor bound) coloured by the
+#' share of fire-weather hours whose wind would push them into the line, over
+#' the canopy height model, with a wind rose of those hours.
+#'
+#' @param risk Output of [wind_fall_exposure()].
+#' @param rasters Output of [corridor_rasters()], optional (canopy backdrop).
+#' @param bound `"lo"` or `"hi"`: conductor bound defining the strike trees.
+#' @param title Plot title; `NULL` states the windward count.
+#' @param file Output PNG path, or `NULL`.
+#' @export
+plot_wind_exposure <- function(risk, rasters = NULL, bound = c("lo", "hi"), title = NULL,
+                               file = NULL) {
+  rlang::check_installed(c("ggplot2", "scales", "patchwork"))
+  bound <- match.arg(bound)
+  info <- attr(risk$segments, "wind")
+  crs <- sf::st_crs(risk$segments)
+  tr <- risk$trees[risk$trees[[paste0("strike_", bound)]], ]
+  tr$hit <- tr[[paste0("wind_hit_", bound)]]
+  tr <- tr[order(tr$hit), ]
+  n_ww <- sum(tr$hit >= info$windward_min, na.rm = TRUE)
+  if (is.null(title)) {
+    title <- sprintf("%d of %d potential strike trees stand where fire-weather winds would throw them into the line",
+                     n_ww, nrow(tr))
+  }
+
+  p <- ggplot2::ggplot()
+  if (!is.null(rasters)) {
+    chm <- terra::as.data.frame(rasters$chm, xy = TRUE, na.rm = TRUE)
+    names(chm)[3] <- "h"
+    p <- p + ggplot2::geom_raster(data = chm, ggplot2::aes(x, y, fill = h), show.legend = FALSE) +
+      ggplot2::scale_fill_gradient(low = "#f4f4ef", high = "#8fae8f", limits = c(0, 30), oob = scales::squish)
+  }
+  p <- p +
+    ggplot2::geom_sf(data = risk$segments, colour = "grey30", linewidth = 0.6) +
+    ggplot2::geom_sf(data = tr, ggplot2::aes(colour = hit), size = 1.8) +
+    ggplot2::scale_colour_gradient(low = "#fde0c5", high = "#b2182b", limits = c(0, 1),
+                                   labels = scales::percent,
+                                   name = "Fire-weather hours that\nthrow the tree into the line") +
+    ggplot2::coord_sf(crs = crs, datum = crs, expand = FALSE) +
+    ggplot2::scale_x_continuous(n.breaks = 3) +
+    ggplot2::labs(x = NULL, y = NULL) +
+    theme_vegrisk() +
+    ggplot2::theme(axis.text = ggplot2::element_text(size = 7))
+
+  rose <- data.frame(dir = info$dir_from_deg)
+  rose$sector <- factor(round(rose$dir / 22.5) %% 16, levels = 0:15)
+  rose <- as.data.frame(table(sector = rose$sector))
+  rose$share <- rose$Freq / sum(rose$Freq)
+  rose$angle <- as.numeric(as.character(rose$sector)) * 22.5
+  r <- ggplot2::ggplot(rose, ggplot2::aes(angle, share)) +
+    ggplot2::geom_col(width = 22.5, fill = "#1f3b73", colour = "white", linewidth = 0.2) +
+    ggplot2::coord_polar(start = -pi / 16) +
+    ggplot2::scale_x_continuous(limits = c(-11.25, 348.75), breaks = c(0, 90, 180, 270),
+                                labels = c("N", "E", "S", "W")) +
+    ggplot2::scale_y_continuous(labels = scales::percent) +
+    ggplot2::labs(x = NULL, y = NULL, title = "Fire-weather winds come from") +
+    theme_vegrisk(9) +
+    ggplot2::theme(axis.text.y = ggplot2::element_text(size = 6), plot.title = ggplot2::element_text(size = 9))
+
+  ge <- intToUtf8(8805)  # >=
+  le <- intToUtf8(8804)  # <=
+  pm <- intToUtf8(177)   # +/-
+  deg <- intToUtf8(176)
+  sub <- sprintf(paste("%d hours with gusts %s %.0f m/s and RH %s %g%% (ERA5 reanalysis via Open-Meteo).",
+                       "\nStrike trees under the %s conductor bound. An hour counts against a tree when its wind",
+                       "\nblows the tree within the arc of fall directions that reach a conductor (%s%g%s fall scatter)."),
+                 info$n_hours, ge, info$min_gust_ms, le, info$max_rh,
+                 if (bound == "lo") "pessimistic (code-minimum)" else "optimistic", pm, info$spread_deg, deg)
+  out <- patchwork::wrap_plots(p, r, widths = c(3, 1)) +
+    patchwork::plot_annotation(title = title, subtitle = sub, theme = theme_vegrisk())
+  save_or_return(out, file, 10, 8)
+}
+
 save_or_return <- function(p, file, w, h) {
   if (is.null(file)) return(p)
   ggplot2::ggsave(file, p, width = w, height = h, dpi = 150, bg = "white")
