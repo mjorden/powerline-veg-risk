@@ -27,5 +27,7 @@ run_case_study(list(
   section_m = 100,                     # cross-section where phases cross trees
   vendor_classes = FALSE,              # delivery has no vegetation/building classes
   # Dry-season Landsat 8/9 composite bracketing the 2020 LiDAR flight.
-  landsat = list(years = 2019:2021, months = 7:9, dry_index = "ndvi")
+  landsat = list(years = 2019:2021, months = 7:9, dry_index = "ndvi"),
+  # Ten years of hourly reanalysis wind; fire weather = top-5% gusts at RH <= 30%.
+  wind = list(start = "2015-01-01", end = "2024-12-31", gust_quantile = 0.95, max_rh = 30)
 ))

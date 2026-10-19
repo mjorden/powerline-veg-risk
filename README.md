@@ -66,7 +66,8 @@ OSM lines (Overpass) ─┘                │
 | Classifier and validation | `train_point_classifier()`, `cv_point_classifier()`, `classify_probs()`, `predict_points()`, `evaluate_vendor_classes()` | [R/classify.R](R/classify.R) |
 | Conductor model and risk | `conductor_profile()`, `corridor_rasters()`, `assess_risk()` | [R/risk.R](R/risk.R) |
 | Dry-season canopy greenness and moisture (optional) | `landsat_scenes()`, `landsat_composite()`, `canopy_dryness()` | [R/landsat.R](R/landsat.R) |
-| Figures | `plot_risk_map()`, `plot_profile()`, `plot_cross_section()`, `plot_cv()`, `plot_importance()`, `plot_canopy_dryness()` | [R/plot.R](R/plot.R) |
+| Fire-weather wind: windward strike trees, forecast watchlist (optional) | `wind_history()`, `fire_wind_hours()`, `wind_fall_exposure()`, `nws_forecast()`, `nws_alerts()`, `forecast_watchlist()` | [R/wind.R](R/wind.R) |
+| Figures | `plot_risk_map()`, `plot_profile()`, `plot_cross_section()`, `plot_cv()`, `plot_importance()`, `plot_canopy_dryness()`, `plot_wind_exposure()` | [R/plot.R](R/plot.R) |
 | Case studies | `run_case_study(cfg)` + one config script per site | [analysis/](analysis/) |
 
 ## Design decisions worth reading
@@ -111,6 +112,13 @@ A crown that reaches wire height has foliage beneath it and stays, so it is stil
 - **LiDAR picks the pixels.** A 30 m pixel is wider than many rights-of-way, so most pixels mix trees with cleared ground. Each pixel gets a canopy fraction from the 1 m CHM, and pixels under 50% canopy are not scored. A segment's value is the mean of its pixels, weighted by how many of the segment's canopy cells *inside the grow-in zone* fall in each one. It describes the trees under the wires, not the forest beside them.
 - **Relative, not absolute.** Neither index has a fire-danger threshold. Each segment is ranked against every canopy pixel in the corridor, and `dry_canopy` marks the lowest quarter. `dry_grow_in` is dry *and* grown in under the optimistic conductor bound; `dry_grow_in_lo` uses the pessimistic tier.
 
+**Weather can't tell segments apart, but wind direction can.** Fire-weather grids are 2.5–25 km wide, so every segment of a short line gets the same wind. The spatial signal comes from combining wind *direction* with where each strike tree stands. Windthrown trees fall roughly downwind, so a tree on the upwind side of the line in dry, high-wind hours matters more than the same tree on the downwind side.
+
+- **Fire-weather hours:** ten years of hourly ERA5 reanalysis (Open-Meteo, no key). Hours count as fire weather when gusts are in the record's top 5% and relative humidity is ≤ 30%.
+- **Hitting arc, from the existing reach test.** A tree of height *h*, with its base a horizontal distance *d* from the outer phase and the conductor *dz* above its base, reaches horizontally *R* = √(*h*² − *dz*²) at conductor height. It hits if it falls within acos(*d*/*R*) of straight at the line. There is no arbitrary angle cutoff, apart from a ±15° allowance for the scatter of real fall directions.
+- **Per tree:** the share of fire-weather hours whose wind would throw it into that arc (`wind_hit_lo` / `wind_hit_hi`). **Per segment:** the windward strike-tree count, and the expected number thrown towards the line in a fire-weather hour. Wind directions are rotated from true to grid north first.
+- **Forecast watchlist:** `analysis/watchlist.R` applies the same thresholds and geometry to the live NWS 7-day hourly forecast and active Red Flag Warnings. It lists the segments whose strike trees the coming winds would throw, plus dry grown-in segments, and when.
+
 ## Case study 1: Sunshine Canyon, Colorado
 
 ![Sunshine conductor profile](man/figures/sunshine_conductor_profile.png)
@@ -147,6 +155,19 @@ With only a few hundred metres of labelled conductor and five structures, wires 
 - **The 5 driest segments** (lowest NDVI quarter; 0.05–0.10, 0.46–0.51, 0.81–0.86 and 1.32–1.42 km) are all bound-dependent: grow-in only if the conductor is at the code minimum. If the conductor turns out to be low there, encroachment and dry fuel coincide, so these come first among the 27 undecidable segments.
 
 ![Sunshine canopy dryness](man/figures/sunshine_canopy_dryness.png)
+
+**Fire-weather winds come from one direction, and that splits the strike trees in two.** Over 2015–2024 there were 609 fire-weather hours (gusts ≥ 15.2 m/s, RH ≤ 30%), two-thirds of them in October–December. 94% came from the west: the Front Range downslope winds behind the 2021 Marshall Fire. The line runs south-west to north-east, so those winds blow trees west of it towards the conductors and trees east of it away.
+
+| | potential strike trees | windward (≥ 50% of fire-weather hours) | expected thrown towards the line per fire-weather hour |
+|---|---:|---:|---:|
+| pessimistic conductor (code minimum) | 307 | 126 | 127 |
+| optimistic conductor (upper bound) | 19 | 10 | 10 |
+
+- **The split is close to all-or-nothing.** Windward trees are hit in 95% of fire-weather hours on average; the median leeward tree is hit in 1%.
+- **Under the optimistic bound, the top grow-in candidate also has the most windward strike trees:** 7 of its 13, at 1.01–1.06 km. It is the segment to verify first on both counts.
+- **The dry segment at 1.32–1.37 km** (lowest NDVI on the line) has 9 strike trees under the pessimistic bound, all windward.
+
+![Sunshine wind exposure](man/figures/sunshine_wind_exposure.png)
 
 ## Case study 2: West Nashville, Tennessee
 
@@ -204,6 +225,7 @@ Wires transfer across space here: average precision 0.88 against a no-skill 0.10
 - **Treetops from a CHM** (local maxima, 5 m window) merge or split crowns in dense stands.
 - **Vertical units** are assumed to match horizontal units (true for both deliveries: metres/metres and US survey feet/US survey feet).
 - **Landsat greenness is not fuel moisture.** Low NDVI over canopy can also mean thin, trimmed or leaf-off crowns, and a 30 m pixel always mixes the right-of-way with its edges. `dry_canopy` ranks segments within one corridor and one composite. It can't be compared across sites or seasons, and it is not a fire-danger rating.
+- **Reanalysis wind is regional.** ERA5 resolves the synoptic flow at 10–25 km, not channelling along a canyon or speed-up over a ridge, and its gusts are a model diagnostic. The watchlist applies thresholds from that record to NWS forecast gusts, which are a different product, so treat the gust threshold as a starting point to tune per site. Trees are assumed to fall downwind, within ±15°; trees that break or lean, or limbs, can do otherwise.
 
 ## Reproduce
 
@@ -216,13 +238,16 @@ install.packages(c("lidR", "sf", "terra", "lwgeom", "ranger", "FNN", "data.table
 ```bash
 Rscript analysis/run_sunshine_canyon.R   # ~0.6 GB of 3DEP LiDAR on first run
 Rscript analysis/run_nashville.R         # ~0.3 GB; uses the Colorado model for the transfer test
+Rscript analysis/watchlist.R sunshine    # live NWS forecast against a finished run (needs `wind` in the config)
 Rscript -e 'devtools::test()'           # unit tests: synthetic geometry + lidR example data, no network
 ```
 
-Cross-validation is the slow part (minutes on mains power, much longer on battery). Set `VEGRISK_REUSE=1` to reuse a site's saved model and validation results and recompute only labels and risk. The OSM layers used are cached in `data-raw/<site>/*.geojson`, so reruns are reproducible even if OSM changes. Outputs go to `output/<site>/`: `segments.gpkg`, `trees.gpkg`, `segments.csv`, `conductor_profile.csv`, `cv_metrics.csv`, `summary.rds`. A site config with `landsat = list(years, months)` also writes `landsat_composite.tif` and `landsat_scenes.csv`; the composite is cached and reused on reruns.
+Cross-validation is the slow part (minutes on mains power, much longer on battery). Set `VEGRISK_REUSE=1` to reuse a site's saved model and validation results and recompute only labels and risk. The OSM layers used are cached in `data-raw/<site>/*.geojson`, so reruns are reproducible even if OSM changes. Outputs go to `output/<site>/`: `segments.gpkg`, `trees.gpkg`, `segments.csv`, `conductor_profile.csv`, `cv_metrics.csv`, `summary.rds`. A site config with `landsat = list(years, months)` also writes `landsat_composite.tif` and `landsat_scenes.csv`; the composite is cached and reused on reruns. `wind = list(start, end)` writes and reuses `wind_hourly.csv`; the watchlist writes `watchlist.csv`.
 
 ## Data
 
 - **LiDAR:** U.S. Geological Survey 3D Elevation Program, public domain: `CO_DRCOG_2020_B20` tiles `w0472n4429`, `w0472n4430`; `TN_DavidsonCounty_D22` tiles `155020`, `155060`, `155100`, `155140`, `169020`.
 - **Power lines, structures, buildings:** © OpenStreetMap contributors, ODbL.
 - **Landsat:** U.S. Geological Survey Landsat 8–9 Collection 2 Level-2 surface reflectance, public domain, accessed through the Microsoft Planetary Computer.
+- **Historical wind:** Copernicus ERA5 reanalysis via the [Open-Meteo](https://open-meteo.com/) historical weather API, CC BY 4.0.
+- **Forecasts and alerts:** U.S. National Weather Service API (api.weather.gov), public domain.
