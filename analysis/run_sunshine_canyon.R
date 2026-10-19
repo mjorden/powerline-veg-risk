@@ -12,7 +12,7 @@ suppressPackageStartupMessages({
   library(data.table)
 })
 dir.create("output", showWarnings = FALSE)
-dir.create("figures", showWarnings = FALSE)
+dir.create("man/figures", showWarnings = FALSE, recursive = TRUE)
 t0 <- Sys.time()
 step <- function(...) message(sprintf("[%5.0fs] ", as.numeric(Sys.time() - t0, units = "secs")), ...)
 
@@ -113,11 +113,11 @@ saveRDS(list(metrics = metrics, confusion = cv$confusion, fold_counts = cv$fold_
 # --- 5. Figures ------------------------------------------------------------------
 plot_risk_map(rasters, risk, supports,
               title = "Vegetation risk along the Sunshine\u2013Boulder Hydro 115 kV line",
-              file = "figures/risk_map.png")
-plot_profile(profile, risk, "figures/conductor_profile.png")
+              file = "man/figures/risk_map.png")
+plot_profile(profile, risk, "man/figures/conductor_profile.png")
 # Section ~100 m along the line, where the three phases cross over trees.
-plot_cross_section(las, pred, lines_utm, "figures/cross_section.png",
+plot_cross_section(las, pred, lines_utm, "man/figures/cross_section.png",
                    at = 100 / as.numeric(sum(st_length(lines_utm))))
-plot_cv(metrics, "figures/cv_metrics.png")
-plot_importance(model, "figures/importance.png")
+plot_cv(metrics, "man/figures/cv_metrics.png")
+plot_importance(model, "man/figures/importance.png")
 step("done")

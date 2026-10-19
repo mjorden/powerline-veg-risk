@@ -1,8 +1,11 @@
 ^data-raw$
 ^analysis$
-^figures$
 ^output$
 ^README\.Rmd$
 ^\.github$
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^LICENSE\.md$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$

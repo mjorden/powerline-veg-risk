@@ -30,9 +30,12 @@ Imports:
     units,
     withr
 Suggests:
+    pkgdown,
     devtools,
     ggplot2,
     patchwork,
     scales,
     testthat (>= 3.0.0)
+URL: https://mjorden.github.io/powerline-veg-risk/, https://github.com/mjorden/powerline-veg-risk
+BugReports: https://github.com/mjorden/powerline-veg-risk/issues
 Config/testthat/edition: 3

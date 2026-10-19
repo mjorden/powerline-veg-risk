@@ -7,3 +7,4 @@ output/
 *.Rcheck/
 vegrisk_*.tar.gz
 output_run.log
+docs/

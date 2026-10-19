@@ -1,0 +1,48 @@
+url: https://mjorden.github.io/powerline-veg-risk/
+
+template:
+  bootstrap: 5
+  bslib:
+    primary: "#1f3b73"
+
+navbar:
+  structure:
+    left: [intro, reference]
+    right: [search, github]
+
+reference:
+  - title: Data acquisition
+    contents:
+      - tnm_lidar_tiles
+      - download_tiles
+      - osm_power_lines
+      - osm_power_structures
+      - osm_buildings
+  - title: Corridor point cloud
+    contents:
+      - read_corridor
+      - line_corridor
+      - las_m_per_unit
+  - title: Classification
+    contents:
+      - point_features
+      - rule_proxy_features
+      - weak_labels
+      - assign_blocks
+      - train_point_classifier
+      - cv_point_classifier
+      - classify_probs
+      - predict_points
+  - title: Conductor model and risk
+    contents:
+      - segment_lines
+      - line_vertex_points
+      - corridor_rasters
+      - conductor_profile
+      - assess_risk
+  - title: Figures
+    contents:
+      - starts_with("plot_")
+  - title: internal
+    contents:
+      - vegrisk-package

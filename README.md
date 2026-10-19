@@ -1,5 +1,11 @@
 # powerline-veg-risk
 
+<!-- badges: start -->
+[![R-CMD-check](https://github.com/mjorden/powerline-veg-risk/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/mjorden/powerline-veg-risk/actions/workflows/R-CMD-check.yaml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
+[![pkgdown site](https://img.shields.io/badge/docs-pkgdown-1f3b73.svg)](https://mjorden.github.io/powerline-veg-risk/)
+<!-- badges: end -->
+
 **Screening a transmission corridor for vegetation risk from public airborne LiDAR, in R.**
 
 `vegrisk` is a small R package plus a reproducible case study. It takes USGS 3DEP point clouds (LAS/LAZ) and OpenStreetMap power-line geometry and produces a segment-by-segment screen for the two vegetation failure modes utilities manage:
@@ -9,7 +15,7 @@
 
 The case study is the **Sunshine–Boulder Hydro 115 kV line** in Sunshine Canyon, Boulder County, Colorado. It's wildland–urban interface: the 2010 Fourmile Canyon Fire burned about 2.5 km to the north-west. Inputs are 1.46 km of line, about 2.2 M above-ground LiDAR points (USGS `CO_DRCOG_2020`, ~35 pts/m²), 5 tagged OSM structures, and 33 OSM buildings.
 
-![Risk map](figures/risk_map.png)
+![Risk map](man/figures/risk_map.png)
 
 ## Pipeline
 
@@ -80,7 +86,7 @@ Every risk metric is computed under both bounds, and each segment is labelled `m
 
 **Structures are masked.** H-frames and crossarms otherwise appear as 18 m "trees" right under the conductors. Cells within 8 m of OSM structure nodes and the line's vertices are treated as unobserved. OSM mappers put a node at each structure, and here they match the H-frames visible in the point cloud. Features one or two cells wide are removed with a 3×3 crown-support filter.
 
-![Conductor profile](figures/conductor_profile.png)
+![Conductor profile](man/figures/conductor_profile.png)
 
 ## Results
 
@@ -93,7 +99,7 @@ Every risk metric is computed under both bounds, and each segment is labelled `m
 | structure | 1,602 | 0.0007 | 0.025 | 0.44 | 0.007 |
 | wire | 920 | 0.0004 | 0.008 | 0.20 | 0.011 |
 
-![Cross-validation](figures/cv_metrics.png)
+![Cross-validation](man/figures/cv_metrics.png)
 
 - **Buildings transfer across space.** Average precision is 0.67, against a no-skill value of 0.0017.
 - **Wires and structures don't.** Random-fold CV makes them look learnable (average precision 0.20 and 0.44), but under spatial blocking they drop to 0.008 and 0.025: some lift over prevalence, nothing usable. Wire and structure labels occur in only 3 of the 5 spatial folds, which is effectively a handful of spans and five structures.
@@ -113,7 +119,7 @@ Every risk metric is computed under both bounds, and each segment is labelled `m
 
 **What would turn this into a decision:** structure attachment heights, or the utility's sag-and-tension model (e.g. PLS-CADD), would collapse the band to a single line. So would a LiDAR flight planned to capture conductors. Everything downstream (clearances, 3D strike geometry, segment ranking) already takes a conductor profile as input.
 
-![Cross-section](figures/cross_section.png)
+![Cross-section](man/figures/cross_section.png)
 
 ## Limitations
 
