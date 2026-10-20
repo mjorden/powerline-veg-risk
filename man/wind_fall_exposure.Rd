@@ -11,7 +11,8 @@ wind_fall_exposure(
   phase_offset_m = 3,
   growth_m = 0,
   spread_deg = 15,
-  windward_min = 0.5
+  windward_min = 0.5,
+  min_hours = 24
 )
 }
 \arguments{
@@ -28,6 +29,10 @@ deviate from the wind direction.}
 
 \item{windward_min}{Share of fire-weather hours at or above which a strike
 tree counts as \emph{windward} of the line.}
+
+\item{min_hours}{Fewer fire-weather hours than this gives a warning: the
+hit shares then rest on a handful of hours. With none at all, every
+wind column is \code{NA}, not zero.}
 }
 \value{
 \code{risk} with added tree columns \code{bearing_deg} (grid bearing from
@@ -36,9 +41,10 @@ hitting arc under each conductor bound; \code{NA} when it cannot reach),
 \code{wind_hit_lo}, \code{wind_hit_hi} (share of fire-weather hours that would
 throw it into the line), and segment columns \code{wind_strike_lo},
 \code{wind_strike_hi} (sum of \verb{wind_hit_*} over strike trees: the expected
-number thrown towards the line in a fire-weather hour) and
-\code{n_strike_windward_lo}, \code{n_strike_windward_hi}. The fire-wind summary is
-stored in \code{attr(risk$segments, "wind")}.
+number thrown towards the line in a fire-weather hour),
+\code{n_strike_windward_lo}, \code{n_strike_windward_hi} and
+\code{n_fire_weather_hours} (so the hour count survives \code{st_write()}). The
+fire-wind summary is stored in \code{attr(risk$segments, "wind")}.
 }
 \description{
 For each potential strike tree from \code{\link[=assess_risk]{assess_risk()}}, works out the arc of

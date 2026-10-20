@@ -11,7 +11,8 @@ forecast_watchlist(
   min_gust_ms = NULL,
   max_rh = NULL,
   spread_deg = NULL,
-  bound = c("lo", "hi")
+  bound = c("lo", "hi"),
+  now = Sys.time()
 )
 }
 \arguments{
@@ -29,12 +30,19 @@ for the climatology in \code{attr(risk$segments, "wind")}.}
 
 \item{bound}{\code{"lo"} or \code{"hi"}: which conductor bound defines the strike
 trees and their arcs.}
+
+\item{now}{Forecast hours before the start of this hour are already past
+and are dropped: NWS gridpoint layers begin at the start of the current
+period, hours before the request. Set it in tests to pin the clock.}
 }
 \value{
 A tibble, one row per segment with any flagged exposure, ordered
 by trees exposed: \code{seg_id}, \code{first_hour}, \code{n_hours}, \code{max_gust_ms},
-\code{min_rh_pct}, \code{n_trees_exposed}, \code{red_flag}, \code{dry_grow_in}. Attribute
-\code{hours} holds the flagged forecast hours.
+\code{min_rh_pct} (\code{NA} when the flagged hours carry no value, e.g. a Red
+Flag Warning over hours with no gust), \code{n_trees_exposed}, \code{red_flag},
+\code{dry_grow_in}. Attribute \code{hours} holds the flagged forecast hours and
+attribute \code{settings} the thresholds, bound, clock and the number of past
+hours dropped, so a writer can record what the list was made with.
 }
 \description{
 Flags forecast hours that meet the fire-weather criteria
