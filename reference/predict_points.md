@@ -21,6 +21,7 @@ predict_points(model, feat)
 
 ## Value
 
-`feat` with `pred` (factor) and one `p_<class>` probability column per
-class (prior-corrected, see
-[`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md)).
+`feat` with `pred` (factor) and one `p_<class>` probability column for
+every class in `label_levels` (prior-corrected, see
+[`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md));
+classes absent from training get probability 0.

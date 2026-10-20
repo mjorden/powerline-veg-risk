@@ -7,7 +7,9 @@ points whose vendor class is in `map` are scored; vendor "unclassified"
 points are excluded. Vegetation usually dominates (prevalence near 1),
 so its F1 cannot show skill: an always-"vegetation" baseline is reported
 alongside, with balanced accuracy and Cohen's kappa over the mapped
-classes. A class that is never predicted has precision 0, not NA.
+classes. A class that is never predicted has precision 0, not NA. A
+class with no vendor points (e.g. no buildings on a rural corridor) has
+`n = 0` and `NA` recall and F1, and is left out of balanced accuracy.
 
 ## Usage
 
@@ -27,7 +29,8 @@ evaluate_vendor_classes(
 
 - vendor_class:
 
-  Integer ASPRS class of the same points.
+  Integer ASPRS class of the same points; must have the same length as
+  `labels`.
 
 - map:
 
@@ -37,4 +40,5 @@ evaluate_vendor_classes(
 
 A list with `metrics` (per-class precision, recall, F1, n, plus
 `balanced_accuracy` and `kappa`), `baseline` (the same for predicting
-the majority class everywhere) and `confusion`.
+the majority class everywhere) and `confusion`. With no points in a
+mapped vendor class, every metric is `NA` (with a warning).

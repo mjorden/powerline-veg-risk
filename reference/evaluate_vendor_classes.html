@@ -6,14 +6,18 @@ whose vendor class is in map are scored; vendor &quot;unclassified&quot; points
 are excluded. Vegetation usually dominates (prevalence near 1), so its F1
 cannot show skill: an always-&quot;vegetation&quot; baseline is reported alongside,
 with balanced accuracy and Cohen's kappa over the mapped classes. A class
-that is never predicted has precision 0, not NA."><meta property="og:description" content="Some 3DEP deliveries classify vegetation (ASPRS 3-5) and buildings (6).
+that is never predicted has precision 0, not NA. A class with no vendor
+points (e.g. no buildings on a rural corridor) has n = 0 and NA recall
+and F1, and is left out of balanced accuracy."><meta property="og:description" content="Some 3DEP deliveries classify vegetation (ASPRS 3-5) and buildings (6).
 Those vendor classes are independent of this package's weak labels, so
 they provide a ground-truth check for the classes they cover. Only points
 whose vendor class is in map are scored; vendor &quot;unclassified&quot; points
 are excluded. Vegetation usually dominates (prevalence near 1), so its F1
 cannot show skill: an always-&quot;vegetation&quot; baseline is reported alongside,
 with balanced accuracy and Cohen's kappa over the mapped classes. A class
-that is never predicted has precision 0, not NA."></head><body>
+that is never predicted has precision 0, not NA. A class with no vendor
+points (e.g. no buildings on a rural corridor) has n = 0 and NA recall
+and F1, and is left out of balanced accuracy."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -54,7 +58,9 @@ whose vendor class is in <code>map</code> are scored; vendor "unclassified" poin
 are excluded. Vegetation usually dominates (prevalence near 1), so its F1
 cannot show skill: an always-"vegetation" baseline is reported alongside,
 with balanced accuracy and Cohen's kappa over the mapped classes. A class
-that is never predicted has precision 0, not NA.</p>
+that is never predicted has precision 0, not NA. A class with no vendor
+points (e.g. no buildings on a rural corridor) has <code>n = 0</code> and <code>NA</code> recall
+and F1, and is left out of balanced accuracy.</p>
     </div>
 
     <div class="section level2">
@@ -75,7 +81,8 @@ that is never predicted has precision 0, not NA.</p>
 
 
 <dt id="arg-vendor-class">vendor_class<a class="anchor" aria-label="anchor" href="#arg-vendor-class"></a></dt>
-<dd><p>Integer ASPRS class of the same points.</p></dd>
+<dd><p>Integer ASPRS class of the same points; must have the
+same length as <code>labels</code>.</p></dd>
 
 
 <dt id="arg-map">map<a class="anchor" aria-label="anchor" href="#arg-map"></a></dt>
@@ -86,7 +93,8 @@ that is never predicted has precision 0, not NA.</p>
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A list with <code>metrics</code> (per-class precision, recall, F1, n, plus
 <code>balanced_accuracy</code> and <code>kappa</code>), <code>baseline</code> (the same for predicting
-the majority class everywhere) and <code>confusion</code>.</p>
+the majority class everywhere) and <code>confusion</code>. With no points in a
+mapped vendor class, every metric is <code>NA</code> (with a warning).</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
