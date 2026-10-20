@@ -29,6 +29,9 @@ run_case_study <- function(cfg) {
   if (!all(file.exists(files))) { # query The National Map only when tiles are missing
     tiles <- tnm_lidar_tiles(st_buffer(st_transform(lines, 4326), 0.001), project = cfg$project)
     tiles <- tiles[basename(tiles$url) %in% cfg$tiles, ]
+    missing <- setdiff(cfg$tiles, basename(tiles$url))
+    if (length(missing)) stop("Tiles not found on The National Map: ", paste(missing, collapse = ", "),
+                              ". A missing tile would leave a hole in the corridor.", call. = FALSE)
     files <- download_tiles(tiles, dirname(files[1]))
   }
   crs <- st_crs(lidR::readLASheader(files[1]))
@@ -198,7 +201,8 @@ run_case_study <- function(cfg) {
                           envelope_m = envelope_m, drop = drop)
     list(rasters = r, risk = assess_risk(r, profile, segments, phase_offset_m = cfg$phase_offset_m,
                                          under_line_m = cfg$under_line_m, wire_zone_m = cfg$wire_zone_m,
-                                         structures = mask_supports, structure_mask_m = cfg$structure_mask_m))
+                                         structures = mask_supports, structure_mask_m = cfg$structure_mask_m,
+                                         coverage_m = cfg$half_width_m))
   }
   ours <- screen(pred, drop = vendor_bldg)
   rasters <- ours$rasters
@@ -207,6 +211,10 @@ run_case_study <- function(cfg) {
                format(rasters$n_conductor_excluded, big.mark = ",")))
   print(table(optimistic = risk$segments$priority, pessimistic = risk$segments$priority_lo))
   print(table(risk$segments$confidence))
+  step(sprintf("LiDAR coverage: %d uncertain points excluded; segment coverage median %.2f, min %.2f (under line min %.2f); %d 'no data'",
+               ours$rasters$n_uncertain_excluded, stats::median(risk$segments$frac_observed),
+               min(risk$segments$frac_observed), min(risk$segments$frac_observed_under),
+               sum(risk$segments$priority_lo == "no data")))
 
   # Same screen on canopy models built from the vendor's vegetation classes:
   # as delivered, and with the same conductor exclusion (separates the

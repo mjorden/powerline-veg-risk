@@ -13,7 +13,8 @@ corridor_rasters(
   below_m = 1,
   min_linearity = 0.6,
   gap_m = 1.5,
-  drop = NULL
+  drop = NULL,
+  void_m = 5
 )
 }
 \arguments{
@@ -38,12 +39,19 @@ conductor return.}
 suspended.}
 
 \item{drop}{Optional logical vector over \code{pred} rows of points to keep out
-of the canopy model (e.g. vendor-classified buildings).}
+of the canopy model (e.g. vendor-classified buildings). These are known
+not to be canopy, so they do not make a cell unobserved.}
+
+\item{void_m}{Width of the square window (metres) that must contain no
+LiDAR return of any class for a cell to count as a void. Wide enough
+that ordinary point spacing never empties it (3DEP QL2 is >= 2 pts/m^2).}
 }
 \value{
 A list with \code{dtm} (ground elevation) and \code{chm} (canopy height),
-both \code{SpatRaster} in metres, \code{unobserved} (logical \code{SpatRaster} or
-\code{NULL}), and \code{n_conductor_excluded}.
+both \code{SpatRaster} in metres, \code{unobserved} (logical \code{SpatRaster}), \code{void}
+(logical \code{SpatRaster}, the voids alone), \code{n_conductor_excluded} and
+\code{n_uncertain_excluded} (points left out of the canopy model as uncertain,
+conductor exclusions included).
 }
 \description{
 The canopy height model (CHM) is built from \emph{consensus} vegetation: points
@@ -67,8 +75,24 @@ conductor elevation minus \code{below_m}) within its 3 x 3 m neighbourhood
 (bundled conductors form ribbons, not lines, so linearity alone misses
 them). A tree crown that reaches wire height has foliage below it and
 stays in the canopy model, as does canopy within \code{gap_m} of a conductor
-(which the clearance target flags anyway). Cells that held excluded points and no remaining canopy are
-returned as \code{unobserved} (not bare ground). Keep \code{envelope_m} no wider
+(which the clearance target flags anyway). Keep \code{envelope_m} no wider
 than the grow-in zone used in \code{\link[=assess_risk]{assess_risk()}}, or tall side trees could
 lose their tops before the fall-in test.
+
+A cell with no canopy is bare ground only if the LiDAR saw it as such.
+Cells are returned as \code{unobserved} (unknown, not bare ground) when either
+\itemize{
+\item they held points kept out of the canopy model whose class is uncertain -
+unlabelled points (the margins around wire / structure / building labels
+and abstained near-line candidates), points the classifier and the rules
+disagree on, and conductor-envelope exclusions - and no canopy remains; or
+\item they are LiDAR voids: no return of any class within a \code{void_m} square
+window (missing or truncated tiles, water, dropouts). The TIN terrain
+model interpolates straight across voids, so they would otherwise read as
+bare ground.
+}
+
+Points the rules labelled wire, structure or building are not uncertain:
+a wire label requires an observed air gap beneath it, and structures and
+buildings are not canopy.
 }

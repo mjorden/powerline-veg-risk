@@ -31,5 +31,7 @@ Segment colour is the canopy area inside the clearance envelope under the
 pessimistic (lower) conductor bound - where to verify first, not a
 finding; line type is the confidence (solid =
 measured conductor or same tier under both bounds, dashed = tier depends
-on the unknown conductor elevation).
+on the unknown conductor elevation). Segments tiered \code{"no data"} (too
+little of the corridor observed to claim no risk) are drawn grey and
+dotted instead of on the encroachment scale, so they never read as clear.
 }

@@ -19,7 +19,9 @@ assess_risk(
   min_support = 6,
   structures = NULL,
   structure_mask_m = 8,
-  min_encroach_m2 = 5
+  min_encroach_m2 = 5,
+  coverage_m = wire_zone_m,
+  min_observed = 0.75
 )
 }
 \arguments{
@@ -65,22 +67,41 @@ structures). Canopy within \code{structure_mask_m} is zeroed so poles,
 H-frames and crossarms are not scored as trees under the line.}
 
 \item{structure_mask_m}{Mask radius around each structure (metres); should
-cover the structure's across-line width. Masked cells are treated as
-unobserved (excluded from cover and clearance), and trees there are not
-scored.}
+cover the structure's across-line width. Masked cells are excluded from
+cover and clearance and trees there are not scored, but they count as
+observed for \code{frac_observed} (a known structure, not a data gap).}
 
 \item{min_encroach_m2}{Canopy area inside the clearance envelope needed to
 call a segment grow-in (guards against single-cell artefacts).}
+
+\item{coverage_m}{Half-width of the band over which LiDAR coverage is
+measured (\code{frac_observed}). Set it to the corridor half-width so that
+voids beside the line, where strike trees stand, count too.}
+
+\item{min_observed}{A segment whose observed share of either the
+\code{coverage_m} band or the \code{under_line_m} zone is below this, and that
+would otherwise be \code{"none"}, is tiered \code{"no data"}: absence of risk
+cannot be claimed where the LiDAR did not see the ground.}
 }
 \value{
 A list: \code{segments} (\code{sf}, one row per segment) and \code{trees} (\code{sf}
 treetops). Columns ending \verb{_lo} / \verb{_hi} use the lower / upper conductor
-bound. \code{priority} is the tier under the optimistic (upper) bound, i.e.
+bound. \code{frac_observed} and \code{frac_observed_under} are the shares of the
+grid cells within \code{coverage_m} and \code{under_line_m} of the segment (not
+past the line's ends) with an observed terrain and canopy value; cells
+off the edge of the data count as unobserved, structure-masked cells as
+observed (known structures, not gaps).
+\code{priority} is the tier under the optimistic (upper) bound, i.e.
 what holds even if the conductor is as high as plausible; \code{priority_lo}
 is the pessimistic tier, which saturates wherever canopy stands under a
-bounded span (the lower bound is only ~5 m above ground). \code{confidence} is
+bounded span (the lower bound is only ~5 m above ground). Tiers are
+\code{"grow-in"}, \code{"fall-in"}, \code{"no data"} (no risk found, but coverage below
+\code{min_observed}) and \code{"none"}. A grow-in or fall-in finding stands even
+at low coverage, though unseen cells could hide a more severe tier.
+\code{confidence} is
 \code{"measured"} (conductor observed over at least half the segment),
-\code{"robust"} (same tier under both bounds) or \code{"bound-dependent"}.
+\code{"robust"} (same tier under both bounds), \code{"bound-dependent"} or
+\code{"low coverage"} (\code{"no data"} under both bounds).
 \verb{encroach_*_m2} is the canopy area under the conductors inside the
 clearance envelope. Rows are ordered by what holds even under the
 optimistic (upper) conductor bound - encroachment, then strike trees -

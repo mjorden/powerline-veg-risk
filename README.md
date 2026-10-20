@@ -101,9 +101,16 @@ Every risk metric is computed under both bounds, and each segment is labelled `m
 
 A crown that reaches wire height has foliage beneath it and stays, so it is still flagged. The envelope comes from where conductor returns actually are and is capped at the grow-in zone, so tall trees beside the line keep their tops for the fall-in test. Cells emptied by the removal are treated as unobserved, not bare ground.
 
+**Unseen is not clear.** A cell with no canopy counts as bare ground only if the LiDAR saw it. Two kinds of cell are unobserved instead:
+
+- cells whose only above-ground returns were left out of the canopy model as uncertain: the unlabelled margins beside wires, structures and buildings, abstained near-line candidates, points the classifier and rules disagree on, and conductor-envelope removals;
+- voids with no return of any class within 5 m, such as a missing tile, water or a dropout. The TIN terrain model bridges these, so without the check they would read as bare ground.
+
+Each segment reports `frac_observed` (across the corridor) and `frac_observed_under` (the grow-in zone). A segment that would be `none` but has less than 75% of either observed is tiered `no data` (confidence `low coverage` when that holds under both bounds), and the risk map draws those grey and dotted. The pipeline also stops if a configured tile is missing from The National Map.
+
 **Fall-in uses 3D geometry and terrain.** A tree pivoting at its base sweeps a sphere of radius *h*. It can strike if the 3D distance from its base to the nearest conductor point (DTM at the tree, modelled conductor elevation, measured outer-phase offset) is ≤ *h*. Trees inside the grow-in zone count as grow-in, not strike.
 
-**Structures are masked.** Towers, H-frames and crossarms otherwise look like tall trees under the conductors. Cells within a structure-sized radius of OSM structure nodes and line vertices (for every circuit in the corridor) are treated as unobserved, and features one or two cells wide are removed with a 3×3 crown-support filter.
+**Structures are masked.** Towers, H-frames and crossarms otherwise look like tall trees under the conductors. Cells within a structure-sized radius of OSM structure nodes and line vertices (for every circuit in the corridor) are masked (known structures: not scored, but not counted as data gaps), and features one or two cells wide are removed with a 3×3 crown-support filter.
 
 **LiDAR says where canopy has grown in; Landsat says how green and wet it is.** The grow-in screen ranks canopy by its distance to the conductor, not by how readily it would carry fire to the line. An optional Landsat step adds that:
 
@@ -218,6 +225,7 @@ Wires transfer across space here: average precision 0.88 against a no-skill 0.10
 
 - **Weak labels.** Wire and structure accuracy is agreement with the labelling rules. Nashville's vendor classes give real ground truth for vegetation and buildings only, and they themselves misclassify conductors. A hand-labelled test set (e.g. in CloudCompare) is the next step.
 - **Bounds rest on assumptions.** Attachment heights are capped (20 m for the H-frames, 45 m for the lattice towers), and every support is assumed to be an OSM vertex or tagged node. A taller or unmapped structure would invalidate the upper bound locally.
+- **Wire labels are trusted.** A wire label requires an observed air gap beneath it, so cells holding only wire-labelled returns count as observed bare ground. A thin branch layer within the label's 4 m layer under a conductor can join the wire label and drop out of the canopy model.
 - **Conductor removal is a judgement.** Canopy within ~1.5 m beneath a conductor can't be told apart from a conductor over dense canopy; both are kept as canopy and flagged as grow-in, which is the conservative choice.
 - **Second circuits** are labelled and their towers masked, but only the study line gets a conductor profile; second-circuit returns over canopy can remain in the canopy model beyond the study line's envelope.
 - **OSM geometry** is volunteer-digitised. Conductor envelopes are sized from where returns actually are, not from the centreline alone.

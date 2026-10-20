@@ -66,10 +66,25 @@ segment_lines <- function(lines, crs, seg_m = 50) {
 #' (bundled conductors form ribbons, not lines, so linearity alone misses
 #' them). A tree crown that reaches wire height has foliage below it and
 #' stays in the canopy model, as does canopy within `gap_m` of a conductor
-#' (which the clearance target flags anyway). Cells that held excluded points and no remaining canopy are
-#' returned as `unobserved` (not bare ground). Keep `envelope_m` no wider
+#' (which the clearance target flags anyway). Keep `envelope_m` no wider
 #' than the grow-in zone used in [assess_risk()], or tall side trees could
 #' lose their tops before the fall-in test.
+#'
+#' A cell with no canopy is bare ground only if the LiDAR saw it as such.
+#' Cells are returned as `unobserved` (unknown, not bare ground) when either
+#'
+#' * they held points kept out of the canopy model whose class is uncertain -
+#'   unlabelled points (the margins around wire / structure / building labels
+#'   and abstained near-line candidates), points the classifier and the rules
+#'   disagree on, and conductor-envelope exclusions - and no canopy remains; or
+#' * they are LiDAR voids: no return of any class within a `void_m` square
+#'   window (missing or truncated tiles, water, dropouts). The TIN terrain
+#'   model interpolates straight across voids, so they would otherwise read as
+#'   bare ground.
+#'
+#' Points the rules labelled wire, structure or building are not uncertain:
+#' a wire label requires an observed air gap beneath it, and structures and
+#' buildings are not canopy.
 #'
 #' @param las Height-normalised `LAS` from [read_corridor()].
 #' @param pred Output of [predict_points()] (with the weak `label` column and
@@ -84,18 +99,28 @@ segment_lines <- function(lines, crs, seg_m = 50) {
 #' @param gap_m Empty space beneath a candidate cluster for it to count as
 #'   suspended.
 #' @param drop Optional logical vector over `pred` rows of points to keep out
-#'   of the canopy model (e.g. vendor-classified buildings).
+#'   of the canopy model (e.g. vendor-classified buildings). These are known
+#'   not to be canopy, so they do not make a cell unobserved.
+#' @param void_m Width of the square window (metres) that must contain no
+#'   LiDAR return of any class for a cell to count as a void. Wide enough
+#'   that ordinary point spacing never empties it (3DEP QL2 is >= 2 pts/m^2).
 #' @return A list with `dtm` (ground elevation) and `chm` (canopy height),
-#'   both `SpatRaster` in metres, `unobserved` (logical `SpatRaster` or
-#'   `NULL`), and `n_conductor_excluded`.
+#'   both `SpatRaster` in metres, `unobserved` (logical `SpatRaster`), `void`
+#'   (logical `SpatRaster`, the voids alone), `n_conductor_excluded` and
+#'   `n_uncertain_excluded` (points left out of the canopy model as uncertain,
+#'   conductor exclusions included).
 #' @export
 corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 15,
-                             below_m = 1, min_linearity = 0.6, gap_m = 1.5, drop = NULL) {
+                             below_m = 1, min_linearity = 0.6, gap_m = 1.5, drop = NULL,
+                             void_m = 5) {
   m <- las_m_per_unit(las)
   res <- res_m / m
   dtm <- lidR::rasterize_terrain(lidR::unnormalize_height(las), res, lidR::tin())
   consensus <- pred$pred == "vegetation" & pred$label %in% "vegetation"
   if (!is.null(drop)) consensus <- consensus & !drop
+  # Kept out of the canopy model without being known non-canopy.
+  uncertain <- !consensus & !(pred$label %in% c("wire", "structure", "building"))
+  if (!is.null(drop)) uncertain <- uncertain & !drop
   hit_rows <- integer()
   if (!is.null(profile) && any(profile$src == "measured")) {
     cand <- which(consensus)
@@ -131,20 +156,29 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
     hit <- near & (linear | suspended)
     hit_rows <- cand[hit]
     consensus[hit_rows] <- FALSE
+    uncertain[hit_rows] <- TRUE
   }
-  veg <- las[pred$pid[consensus]]
-  chm <- lidR::rasterize_canopy(veg, res, lidR::p2r(subcircle = 0.15 / m))
-  chm <- terra::crop(terra::extend(chm, dtm), dtm)
-  unobserved <- NULL
-  if (length(hit_rows)) {
-    cells <- terra::cellFromXY(dtm, as.matrix(pred[hit_rows, c("X", "Y")]))
-    unobserved <- terra::setValues(dtm, FALSE)
-    unobserved[unique(stats::na.omit(cells))] <- TRUE
-    unobserved <- unobserved & is.na(chm)
+  if (any(consensus)) {
+    veg <- las[pred$pid[consensus]]
+    chm <- lidR::rasterize_canopy(veg, res, lidR::p2r(subcircle = 0.15 / m))
+    chm <- terra::crop(terra::extend(chm, dtm), dtm)
+  } else { # no canopy anywhere (e.g. a cleared corridor)
+    chm <- terra::setValues(dtm, NA_real_)
   }
+
+  excluded <- terra::setValues(dtm, FALSE)
+  cells <- terra::cellFromXY(dtm, as.matrix(pred[which(uncertain), c("X", "Y")]))
+  excluded[unique(stats::na.omit(cells))] <- TRUE
+  # Voids: returns of any class (ground included) per cell, summed over the
+  # window; NA-padding at the raster edge is ignored.
+  n_ret <- tabulate(stats::na.omit(terra::cellFromXY(dtm, cbind(las$X, las$Y))),
+                    nbins = terra::ncell(dtm))
+  w <- 2L * floor(void_m / res_m / 2) + 1L # odd window, no wider than void_m
+  void <- terra::focal(terra::setValues(dtm, n_ret), w = w, fun = "sum", na.rm = TRUE) == 0
+  unobserved <- (excluded & is.na(chm)) | void
   # Z is assumed to share the horizontal unit (true for both case studies).
-  list(dtm = dtm * m, chm = chm * m, unobserved = unobserved,
-       n_conductor_excluded = length(hit_rows))
+  list(dtm = dtm * m, chm = chm * m, unobserved = unobserved, void = void,
+       n_conductor_excluded = length(hit_rows), n_uncertain_excluded = sum(uncertain))
 }
 
 #' Model conductor elevation along the line
@@ -356,9 +390,9 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   structures). Canopy within `structure_mask_m` is zeroed so poles,
 #'   H-frames and crossarms are not scored as trees under the line.
 #' @param structure_mask_m Mask radius around each structure (metres); should
-#'   cover the structure's across-line width. Masked cells are treated as
-#'   unobserved (excluded from cover and clearance), and trees there are not
-#'   scored.
+#'   cover the structure's across-line width. Masked cells are excluded from
+#'   cover and clearance and trees there are not scored, but they count as
+#'   observed for `frac_observed` (a known structure, not a data gap).
 #' @param min_support A CHM cell counts as canopy only if at least this many
 #'   cells of its 3 x 3 window are >= `cover_min_m`. Removes 1-2 cell features
 #'   (unmapped single poles, stray conductor returns classified as vegetation)
@@ -366,14 +400,31 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   trims crown edges slightly.
 #' @param min_encroach_m2 Canopy area inside the clearance envelope needed to
 #'   call a segment grow-in (guards against single-cell artefacts).
+#' @param coverage_m Half-width of the band over which LiDAR coverage is
+#'   measured (`frac_observed`). Set it to the corridor half-width so that
+#'   voids beside the line, where strike trees stand, count too.
+#' @param min_observed A segment whose observed share of either the
+#'   `coverage_m` band or the `under_line_m` zone is below this, and that
+#'   would otherwise be `"none"`, is tiered `"no data"`: absence of risk
+#'   cannot be claimed where the LiDAR did not see the ground.
 #' @return A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
 #'   treetops). Columns ending `_lo` / `_hi` use the lower / upper conductor
-#'   bound. `priority` is the tier under the optimistic (upper) bound, i.e.
+#'   bound. `frac_observed` and `frac_observed_under` are the shares of the
+#'   grid cells within `coverage_m` and `under_line_m` of the segment (not
+#'   past the line's ends) with an observed terrain and canopy value; cells
+#'   off the edge of the data count as unobserved, structure-masked cells as
+#'   observed (known structures, not gaps).
+#'   `priority` is the tier under the optimistic (upper) bound, i.e.
 #'   what holds even if the conductor is as high as plausible; `priority_lo`
 #'   is the pessimistic tier, which saturates wherever canopy stands under a
-#'   bounded span (the lower bound is only ~5 m above ground). `confidence` is
+#'   bounded span (the lower bound is only ~5 m above ground). Tiers are
+#'   `"grow-in"`, `"fall-in"`, `"no data"` (no risk found, but coverage below
+#'   `min_observed`) and `"none"`. A grow-in or fall-in finding stands even
+#'   at low coverage, though unseen cells could hide a more severe tier.
+#'   `confidence` is
 #'   `"measured"` (conductor observed over at least half the segment),
-#'   `"robust"` (same tier under both bounds) or `"bound-dependent"`.
+#'   `"robust"` (same tier under both bounds), `"bound-dependent"` or
+#'   `"low coverage"` (`"no data"` under both bounds).
 #'   `encroach_*_m2` is the canopy area under the conductors inside the
 #'   clearance envelope. Rows are ordered by what holds even under the
 #'   optimistic (upper) conductor bound - encroachment, then strike trees -
@@ -383,15 +434,22 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
                         phase_offset_m = 3, growth_m = 0, under_line_m = 6,
                         wire_zone_m = 10, clearance_target_m = 4.6, cover_min_m = 2,
                         min_support = 6, structures = NULL, structure_mask_m = 8,
-                        min_encroach_m2 = 5) {
+                        min_encroach_m2 = 5, coverage_m = wire_zone_m, min_observed = 0.75) {
   crs <- sf::st_crs(segments)
   m <- crs_m_per_unit(crs)
   dtm <- rasters$dtm
+  # NA canopy means "no vegetation point": bare ground, unless the cell is
+  # flagged unobserved (void or uncertain exclusion).
   chm <- terra::ifel(is.na(rasters$chm), 0, rasters$chm)
   if (!is.null(rasters$unobserved)) chm <- terra::mask(chm, rasters$unobserved, maskvalues = TRUE)
+  observed <- !is.na(chm) & !is.na(dtm)
   if (!is.null(structures) && nrow(structures) > 0) {
     mask <- sf::st_union(sf::st_buffer(sf::st_transform(sf::st_geometry(structures), crs),
                                        structure_mask_m / m))
+    # A structure footprint is known, not a data gap, even where its returns
+    # were left out of the canopy model as uncertain.
+    observed <- terra::mask(observed, terra::vect(mask), inverse = TRUE, updatevalue = TRUE) &
+      !is.na(dtm)
     # NA, not 0: masked cells are unobserved, not bare ground.
     chm <- terra::mask(chm, terra::vect(mask), inverse = TRUE, updatevalue = NA)
   }
@@ -400,19 +458,29 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   # keep them NA so the filter can't turn them into bare ground.
   chm <- terra::ifel(is.na(chm), NA, terra::ifel(support >= min_support, chm, 0))
 
+  s_end <- tapply(profile$s_m, profile$line_id, max)
   near <- function(xy) {
     p <- line_project(xy, profile, m)
     list(dh = p$dist_m, seg_id = profile$seg_id[p$vertex],
-         z_lo = profile$z_lo[p$vertex], z_hi = profile$z_hi[p$vertex])
+         z_lo = profile$z_lo[p$vertex], z_hi = profile$z_hi[p$vertex],
+         inside = p$s_m >= 0 & p$s_m <= s_end[as.character(p$line_id)])
   }
 
   # --- canopy cells: cover and grow-in clearance ---------------------------
-  cells <- terra::as.data.frame(c(chm, dtm), xy = TRUE, na.rm = FALSE)
-  names(cells) <- c("x", "y", "h", "ground")
-  cells <- cells[!is.na(cells$ground) & !is.na(cells$h), ]
+  cells <- terra::as.data.frame(c(chm, dtm, observed), xy = TRUE, na.rm = FALSE)
+  names(cells) <- c("x", "y", "h", "ground", "observed")
   nc <- near(as.matrix(cells[, c("x", "y")]))
   cells$dh <- nc$dh
   cells$seg_id <- nc$seg_id
+  # Coverage is counted over every grid cell alongside the line (not past
+  # its ends), so cells off the data's edge count as unobserved too.
+  band <- nc$inside & nc$dh <= max(coverage_m, under_line_m)
+  seen <- cells[band, c("dh", "seg_id", "observed")]
+  seen$observed <- seen$observed %in% TRUE
+  seen <- split(seen, seen$seg_id)
+  scored <- cells$observed %in% TRUE & !is.na(cells$h)
+  cells <- cells[scored, ]
+  nc <- lapply(nc, `[`, scored)
   top <- cells$ground + cells$h
   cells$clear_lo <- nc$z_lo - top
   cells$clear_hi <- nc$z_hi - top
@@ -442,15 +510,23 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   # --- per-segment summary --------------------------------------------------
   frac_measured <- tapply(profile$src == "measured", profile$seg_id, mean)
   cell_area <- prod(terra::res(chm)) * m^2
+  coverage <- function(sn, width) {
+    if (is.null(sn)) return(0)
+    band <- sn$observed[sn$dh <= width]
+    if (length(band)) mean(band) else 0
+  }
   seg_stats <- lapply(segments$seg_id, function(s) {
     cs <- cells[cells$seg_id == s, ]
     wz <- cs[cs$dh <= wire_zone_m, ]
     ul <- cs[cs$dh <= under_line_m & cs$h >= cover_min_m, ]
     ts <- trees[trees$seg_id == s, ]
     fm <- frac_measured[as.character(s)]
+    sn <- seen[[as.character(s)]]
     data.frame(
       seg_id             = s,
       frac_measured      = if (is.na(fm)) 0 else unname(fm),
+      frac_observed      = coverage(sn, coverage_m),
+      frac_observed_under = coverage(sn, under_line_m),
       wire_zone_cover    = if (nrow(wz)) mean(wz$h >= cover_min_m) else NA_real_,
       wire_zone_max_h_m  = if (nrow(wz)) max(wz$h) else NA_real_,
       min_clearance_lo_m = if (nrow(ul)) min(ul$clear_lo) else NA_real_,
@@ -462,17 +538,20 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     )
   })
   out <- merge(segments, do.call(rbind, seg_stats), by = "seg_id")
+  unseen <- out$frac_observed < min_observed | out$frac_observed_under < min_observed
   tier <- function(area, n) {
-    ifelse(area >= min_encroach_m2, "grow-in", ifelse(n > 0, "fall-in", "none"))
+    t <- ifelse(area >= min_encroach_m2, "grow-in", ifelse(n > 0, "fall-in", "none"))
+    ifelse(t == "none" & unseen, "no data", t)
   }
-  lv <- c("grow-in", "fall-in", "none")
+  lv <- c("grow-in", "fall-in", "no data", "none")
   p_lo <- tier(out$encroach_lo_m2, out$n_strike_lo)
   p_hi <- tier(out$encroach_hi_m2, out$n_strike_hi)
   out$priority <- factor(p_hi, levels = lv)
   out$priority_lo <- factor(p_lo, levels = lv)
   out$confidence <- factor(
-    ifelse(out$frac_measured >= 0.5, "measured", ifelse(p_lo == p_hi, "robust", "bound-dependent")),
-    levels = c("measured", "robust", "bound-dependent")
+    ifelse(p_lo == "no data", "low coverage",
+           ifelse(out$frac_measured >= 0.5, "measured", ifelse(p_lo == p_hi, "robust", "bound-dependent"))),
+    levels = c("measured", "robust", "bound-dependent", "low coverage")
   )
   out <- out[order(-out$encroach_hi_m2, -out$n_strike_hi, -out$encroach_lo_m2,
                    -out$n_strike_lo), ]

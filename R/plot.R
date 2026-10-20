@@ -19,7 +19,9 @@ theme_vegrisk <- function(base_size = 10) {
 #' pessimistic (lower) conductor bound - where to verify first, not a
 #' finding; line type is the confidence (solid =
 #' measured conductor or same tier under both bounds, dashed = tier depends
-#' on the unknown conductor elevation).
+#' on the unknown conductor elevation). Segments tiered `"no data"` (too
+#' little of the corridor observed to claim no risk) are drawn grey and
+#' dotted instead of on the encroachment scale, so they never read as clear.
 #'
 #' @param rasters Output of [corridor_rasters()].
 #' @param risk Output of [assess_risk()].
@@ -37,6 +39,9 @@ plot_risk_map <- function(rasters, risk, structures = NULL,
   crs <- sf::st_crs(risk$segments)
   seg <- risk$segments
   seg$certain <- ifelse(seg$confidence == "bound-dependent", "bound-dependent", "measured / robust")
+  # "no data" only replaces "none", so this means no data under both bounds.
+  seg$certain[seg$priority_lo %in% "no data"] <- "insufficient LiDAR coverage"
+  gap <- seg$certain == "insufficient LiDAR coverage"
   strike <- risk$trees[risk$trees$strike, ]
   strike$both <- factor(ifelse(strike$strike_lo & strike$strike_hi, "under both bounds", "under one bound"),
                         levels = c("under both bounds", "under one bound"))
@@ -45,10 +50,12 @@ plot_risk_map <- function(rasters, risk, structures = NULL,
     ggplot2::geom_raster(data = chm, ggplot2::aes(x, y, fill = h)) +
     ggplot2::scale_fill_gradient(low = "#f4f4ef", high = "#1b4d1b", limits = c(0, 30),
                                  oob = scales::squish, name = "Canopy height (m)") +
-    ggplot2::geom_sf(data = seg, ggplot2::aes(colour = encroach_lo_m2, linetype = certain), linewidth = 1.1) +
+    ggplot2::geom_sf(data = seg[!gap, ], ggplot2::aes(colour = encroach_lo_m2, linetype = certain), linewidth = 1.1) +
+    ggplot2::geom_sf(data = seg[gap, ], ggplot2::aes(linetype = certain), colour = "grey45", linewidth = 1.1) +
     ggplot2::scale_colour_gradient(low = "#fee8c8", high = "#b30000",
                                    name = "Canopy in clearance envelope\nif conductor at code minimum (m\u00b2)") +
-    ggplot2::scale_linetype_manual(values = c(`measured / robust` = "solid", `bound-dependent` = "22"),
+    ggplot2::scale_linetype_manual(values = c(`measured / robust` = "solid", `bound-dependent` = "22",
+                                                    `insufficient LiDAR coverage` = "11"),
                                    name = NULL) +
     ggplot2::geom_sf(data = strike, ggplot2::aes(shape = both), size = 1.5, stroke = 0.4,
                      fill = "#ffd92f", colour = "black") +
