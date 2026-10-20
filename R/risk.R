@@ -396,7 +396,9 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     chm <- terra::mask(chm, terra::vect(mask), inverse = TRUE, updatevalue = NA)
   }
   support <- terra::focal(chm >= cover_min_m, w = 3, fun = "sum", na.rm = TRUE)
-  chm <- terra::ifel(support >= min_support, chm, 0)
+  # na.rm gives masked cells next to observed ones a finite support count;
+  # keep them NA so the filter can't turn them into bare ground.
+  chm <- terra::ifel(is.na(chm), NA, terra::ifel(support >= min_support, chm, 0))
 
   near <- function(xy) {
     p <- line_project(xy, profile, m)
