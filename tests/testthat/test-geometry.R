@@ -83,3 +83,58 @@ test_that("evaluate_vendor_classes exposes the majority-class baseline", {
   expect_equal(ev$metrics, ev$baseline)
   expect_gt(ev$metrics$f1[1], 0.98)     # high vegetation F1 despite no skill
 })
+
+test_that("evaluate_vendor_classes handles a mapped class with no vendor points (#28)", {
+  # Rural corridor: no ASPRS 6 (building) points at all.
+  lab <- factor(c("vegetation", "vegetation", "building", "wire"), levels = label_levels)
+  vc <- c(3L, 4L, 5L, 2L)
+  ev <- evaluate_vendor_classes(lab, vc)
+  v <- ev$metrics[ev$metrics$class == "vegetation", ]
+  b <- ev$metrics[ev$metrics$class == "building", ]
+  expect_equal(b$n, 0)
+  expect_true(is.na(b$recall))
+  expect_true(is.na(b$f1))
+  expect_equal(b$precision, 0)              # predicted building where there is none
+  expect_equal(v$recall, 2 / 3)
+  expect_equal(v$balanced_accuracy, 2 / 3)  # absent class left out, not NaN
+  # Neither predicted nor present: precision is undefined too.
+  ev2 <- evaluate_vendor_classes(factor(rep("vegetation", 3), levels = label_levels), c(3L, 4L, 5L))
+  expect_true(is.na(ev2$metrics$precision[ev2$metrics$class == "building"]))
+  expect_equal(ev2$metrics$recall[ev2$metrics$class == "vegetation"], 1)
+})
+
+test_that("evaluate_vendor_classes returns NA metrics, not an error, when nothing is scored (#28)", {
+  expect_warning(ev <- evaluate_vendor_classes(factor(character(), levels = label_levels), integer()),
+                 "No points")
+  expect_equal(nrow(ev$metrics), 2)
+  expect_true(all(is.na(ev$metrics$recall)))
+  expect_true(all(is.na(ev$metrics$kappa)))
+  expect_equal(ev$metrics$n, c(0L, 0L))
+  # Only unclassified/ground vendor points: same.
+  expect_warning(evaluate_vendor_classes(factor(c("vegetation", "wire"), levels = label_levels),
+                                         c(1L, 2L)), "No points")
+})
+
+test_that("evaluate_vendor_classes rejects mismatched lengths (#28)", {
+  lab <- factor(c("vegetation", "building"), levels = label_levels)
+  expect_error(evaluate_vendor_classes(lab, c(3L, 6L, 5L, 6L)), "same length")
+  expect_error(evaluate_vendor_classes(rep(lab, 2), c(3L, 6L)), "same length")
+})
+
+test_that("predict_points emits a p_ column for every class, trained or not (#28)", {
+  set.seed(3)
+  n <- 200
+  feat <- data.table::data.table(
+    pid = seq_len(2 * n), X = 0, Y = 0, Z = 0,
+    a = c(stats::rnorm(n, 0), stats::rnorm(n, 3)),
+    b = stats::runif(2 * n),
+    label = factor(rep(c("vegetation", "structure"), each = n), levels = label_levels)
+  )
+  model <- train_point_classifier(feat, num_trees = 20)
+  pred <- predict_points(model, feat)
+  expect_true(all(paste0("p_", label_levels) %in% names(pred)))
+  expect_true(all(pred$p_wire == 0))
+  expect_true(all(pred$p_building == 0))
+  expect_equal(pred$p_vegetation + pred$p_structure, rep(1, 2 * n), tolerance = 1e-9)
+  expect_setequal(levels(pred$pred), label_levels)
+})

@@ -13,14 +13,16 @@ evaluate_vendor_classes(
 \arguments{
 \item{labels}{Factor of labels to score (e.g. \code{pred$pred} or \code{feat$label}).}
 
-\item{vendor_class}{Integer ASPRS class of the same points.}
+\item{vendor_class}{Integer ASPRS class of the same points; must have the
+same length as \code{labels}.}
 
 \item{map}{Named list mapping package labels to vendor class codes.}
 }
 \value{
 A list with \code{metrics} (per-class precision, recall, F1, n, plus
 \code{balanced_accuracy} and \code{kappa}), \code{baseline} (the same for predicting
-the majority class everywhere) and \code{confusion}.
+the majority class everywhere) and \code{confusion}. With no points in a
+mapped vendor class, every metric is \code{NA} (with a warning).
 }
 \description{
 Some 3DEP deliveries classify vegetation (ASPRS 3-5) and buildings (6).
@@ -30,5 +32,7 @@ whose vendor class is in \code{map} are scored; vendor "unclassified" points
 are excluded. Vegetation usually dominates (prevalence near 1), so its F1
 cannot show skill: an always-"vegetation" baseline is reported alongside,
 with balanced accuracy and Cohen's kappa over the mapped classes. A class
-that is never predicted has precision 0, not NA.
+that is never predicted has precision 0, not NA. A class with no vendor
+points (e.g. no buildings on a rural corridor) has \code{n = 0} and \code{NA} recall
+and F1, and is left out of balanced accuracy.
 }

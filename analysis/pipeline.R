@@ -146,8 +146,11 @@ run_case_study <- function(cfg) {
     sc <- !conductor_zone  # same scored set for every method
     cut_vc <- function(x) cut(x, c(-Inf, 1, 2, 5, 6, Inf),
                               labels = c("unclassified", "ground", "vegetation", "building", "other"))
-    raw_wire <- function(model) stats::predict(model, as.data.frame(
-      feat[, model$forest$independent.variable.names, with = FALSE]))$predictions[, "wire"]
+    raw_wire <- function(model) {
+      p <- stats::predict(model, as.data.frame(
+        feat[, model$forest$independent.variable.names, with = FALSE]))$predictions
+      if ("wire" %in% colnames(p)) p[, "wire"] else rep(0, nrow(p))  # model never saw wire
+    }
     wire_skill <- function(lab, p) data.frame(
       wire_recall = mean(lab[feat$label %in% "wire"] == "wire"),
       wire_ap = avg_precision(p, feat$label %in% "wire"),

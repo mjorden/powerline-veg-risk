@@ -13,7 +13,8 @@ predict_points(model, feat)
 }
 \value{
 \code{feat} with \code{pred} (factor) and one \verb{p_<class>} probability column
-per class (prior-corrected, see \code{\link[=classify_probs]{classify_probs()}}).
+for every class in \code{label_levels} (prior-corrected, see
+\code{\link[=classify_probs]{classify_probs()}}); classes absent from training get probability 0.
 }
 \description{
 Classify all featurised points
