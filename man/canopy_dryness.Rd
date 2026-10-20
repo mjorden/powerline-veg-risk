@@ -12,10 +12,16 @@ canopy_dryness(
   zone_m = 6,
   corridor_m = NULL,
   cover_min_m = 2,
+  structures = NULL,
+  structure_mask_m = 8,
+  min_support = 6,
   min_canopy_frac = 0.5,
+  min_coverage = 0.8,
+  min_obs = 3,
   dry_index = c("ndvi", "ndmi"),
   dry_quantile = 0.25,
   min_canopy_m2 = 5,
+  min_canopy_px = 2,
   min_ref_px = 20
 )
 }
@@ -40,7 +46,22 @@ uses the farthest canopy return from the line.}
 
 \item{cover_min_m}{Canopy height counted as cover.}
 
-\item{min_canopy_frac}{Minimum canopy fraction of a Landsat pixel for it to
+\item{structures, structure_mask_m}{As in \code{\link[=assess_risk]{assess_risk()}}: support points
+(OSM nodes and line vertices) whose surroundings are treated as unknown
+rather than canopy or bare ground. Pass the same objects as to
+\code{\link[=assess_risk]{assess_risk()}} so both screens describe the same canopy.}
+
+\item{min_support}{As in \code{\link[=assess_risk]{assess_risk()}}: a cell counts as canopy only if
+at least this many cells of its 3 x 3 window are canopy. \code{0} disables
+the filter.}
+
+\item{min_canopy_frac}{Minimum canopy fraction (of observed cells) for a
+Landsat pixel to be scored.}
+
+\item{min_coverage}{Minimum share of a pixel's 30 m footprint observed by
+the LiDAR for it to be scored.}
+
+\item{min_obs}{Minimum clear Landsat observations behind a pixel for it to
 be scored.}
 
 \item{dry_index}{\code{"ndvi"} or \code{"ndmi"}: the index used for \code{dry_canopy}.}
@@ -48,18 +69,20 @@ be scored.}
 \item{dry_quantile}{Percentile (0-1) at or below which a segment is
 \code{dry_canopy}.}
 
-\item{min_canopy_m2}{Segments with less grown-in canopy than this (in
-scored pixels) get their indices but no percentile or \code{dry_canopy}.}
+\item{min_canopy_m2, min_canopy_px}{Segments with less grown-in canopy than
+this (in scored pixels), or spread over fewer scored pixels, get their
+indices but no percentile or \code{dry_canopy}.}
 
-\item{min_ref_px}{Minimum canopy-dominated pixels in the corridor needed to
-compute percentiles; below it the \verb{*_pct} columns are \code{NA}.}
+\item{min_ref_px}{Minimum scored pixels in the corridor needed to compute
+percentiles; below it the \verb{*_pct} columns are \code{NA}.}
 }
 \value{
 A list: \code{segments} (the risk segments with added columns
 \code{canopy_px}, \code{canopy_m2}, \code{ndvi}, \code{ndmi}, \code{ndvi_pct}, \code{ndmi_pct},
 \code{dry_canopy}, \code{dry_grow_in}, \code{dry_grow_in_lo}) and \code{pixels} (\code{sf}
 points at Landsat pixel centres with \code{ndvi}, \code{ndmi}, \code{n_obs},
-\code{canopy_frac}, \code{scored}).
+\code{canopy_frac}, \code{coverage}, \code{scored}). \code{attr(segments, "landsat")}
+records the gates and how many pixels each one excluded.
 }
 \description{
 Joins a Landsat composite to the LiDAR screen. The LiDAR canopy height
@@ -67,17 +90,27 @@ model decides \emph{which} 30 m pixels to read and how much each one counts:
 }
 \details{
 \enumerate{
-\item Each Landsat pixel's canopy fraction is the share of its 1 m CHM cells
-at or above \code{cover_min_m}. Pixels below \code{min_canopy_frac} are mostly
-cleared right-of-way, road or roof, and are not scored - their index
-would describe the gap, not the trees.
+\item The CHM is cleaned the way \code{\link[=assess_risk]{assess_risk()}} cleans it: cells within
+\code{structure_mask_m} of a support are unknown, and canopy needs
+\code{min_support} canopy cells in its 3 x 3 window (removes 1-2 cell poles
+and stray returns). Each Landsat pixel's canopy fraction is then the
+share of its \emph{observed} 1 m cells at or above \code{cover_min_m}, and its
+coverage is the share of its whole 30 m footprint that the LiDAR
+observed. A pixel is scored only if it is canopy-dominated
+(\code{min_canopy_frac}), mostly observed (\code{min_coverage}: a pixel on the
+corridor edge or inside a bend otherwise rests on a sliver of canopy
+and its reflectance describes land outside the LiDAR clip) and has
+enough clear looks (\code{min_obs}).
 \item A segment's value is the mean of its pixels' indices weighted by how
 many of the segment's canopy cells \emph{within \code{zone_m} of the line} fall
 in each pixel, so it describes the canopy under the conductors rather
 than the forest beside the right-of-way.
-\item Each segment value is ranked against every canopy-dominated pixel in
-the corridor (a percentile, \verb{*_pct}). \code{dry_canopy} flags segments in
-the lowest \code{dry_quantile} of \code{dry_index}.
+\item Each segment value is ranked against every scored pixel in the
+corridor (a percentile, \verb{*_pct}). \code{dry_canopy} flags segments in the
+lowest \code{dry_quantile} of \code{dry_index}. A segment resting on fewer than
+\code{min_canopy_px} pixels, or on less than \code{min_canopy_m2} of canopy,
+keeps its indices but gets no percentile: one mixed 30 m pixel cannot
+carry a ranking.
 }
 
 \code{dry_grow_in} combines the two screens: grow-in under the optimistic

@@ -247,9 +247,14 @@ run_case_study <- function(cfg) {
     }
     dryness <- canopy_dryness(comp, rasters, profile, risk, zone_m = cfg$under_line_m,
                               corridor_m = cfg$half_width_m,
+                              structures = mask_supports, structure_mask_m = cfg$structure_mask_m,
                               dry_index = if (is.null(lc$dry_index)) "ndvi" else lc$dry_index)
-    step(sprintf("Landsat: %d dry-season scenes; %d canopy pixels in the corridor",
-                 length(attr(comp, "scenes")), attr(dryness$segments, "landsat")$n_ref_px))
+    li <- attr(dryness$segments, "landsat")
+    step(sprintf("Landsat: %d dry-season scenes; %d scored canopy pixels (excluded: %d under %.0f%% canopy, %d under %.0f%% coverage, %d under %d clear looks)",
+                 length(attr(comp, "scenes")), li$n_ref_px,
+                 li$n_px_excluded[["canopy_frac"]], 100 * li$min_canopy_frac,
+                 li$n_px_excluded[["coverage"]], 100 * li$min_coverage,
+                 li$n_px_excluded[["n_obs"]], li$min_obs))
     print(table(grow_in = dryness$segments$priority == "grow-in",
                 dry_canopy = dryness$segments$dry_canopy, useNA = "ifany"))
     risk$segments <- dryness$segments

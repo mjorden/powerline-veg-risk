@@ -49,6 +49,10 @@ composite <- function(east_ndvi = 0.3, west_ndvi = 0.8, side_ndvi = 0.6) {
   xy <- terra::crds(r, na.rm = FALSE)
   east <- xy[, 1] > x0 + 100
   ndvi <- ifelse(east, east_ndvi, ifelse(abs(xy[, 2] - y0) > 30, side_ndvi, west_ndvi))
+  # A gentle west-to-east gradient (0.01 per pixel column) so the reference
+  # distribution has spread: a two-valued composite ranks every segment mean
+  # at a tie.
+  ndvi <- ndvi + 0.01 * ((xy[, 1] - x0) %/% 30)
   r <- terra::setValues(r, cbind(ndvi, ndvi - 0.3, 8))
   names(r) <- c("ndvi", "ndmi", "n_obs")
   r
@@ -66,21 +70,26 @@ screen <- function(r) {
 test_that("segment greenness comes from the grown-in canopy's pixels", {
   r <- corridor(function(x, y) rep(9, length(x))) # closed 9 m canopy: grow-in everywhere
   sc <- screen(r)
-  d <- canopy_dryness(composite(), r, sc$profile, sc$risk, dry_quantile = 0.6)
+  d <- canopy_dryness(composite(), r, sc$profile, sc$risk, dry_quantile = 0.6, min_ref_px = 1)
   s <- sf::st_drop_geometry(d$segments)
   s <- s[order(s$seg_id), ]
-  # Under-line pixels only (0.8, not the 0.6 woods beside the line); the
-  # 1 m column at the shared segment vertex can fall either way.
-  expect_equal(s$ndvi, c(0.8, 0.3), tolerance = 0.01)
-  expect_equal(s$ndmi, c(0.5, 0.0), tolerance = 0.01)
+  # Under-line pixels only (about 0.8, not the 0.6 woods beside the line);
+  # the 1 m column at the shared segment vertex can fall either way.
+  expect_true(s$ndvi[1] > 0.78 && s$ndvi[1] < 0.84)
+  expect_true(s$ndvi[2] > 0.32 && s$ndvi[2] < 0.36)
+  expect_equal(s$ndmi, s$ndvi - 0.3, tolerance = 1e-6)
   expect_true(all(s$canopy_m2 > 0))
-  # Ranked against every canopy pixel: half the corridor is the 0.3 east.
-  expect_gt(s$ndvi_pct[1], 0.7)
-  expect_equal(s$ndvi_pct[2], 0.5, tolerance = 0.05)
+  # Ranked against every scored pixel: the east half of the corridor is dry.
+  expect_gt(s$ndvi_pct[1], 0.6)
+  expect_lt(s$ndvi_pct[2], 0.5)
   expect_identical(s$dry_canopy, c(FALSE, TRUE))
   expect_identical(s$dry_grow_in, c(FALSE, TRUE))
   expect_equal(attr(d$segments, "landsat")$dry_index, "ndvi")
-  expect_true(all(d$pixels$scored))
+  # Pixels wholly inside the corridor are scored; those straddling the CHM
+  # edge are mostly unobserved and are not.
+  inside <- d$pixels$coverage >= 0.999
+  expect_true(any(inside) && all(d$pixels$scored[inside]))
+  expect_true(all(!d$pixels$scored[d$pixels$coverage < 0.8]))
 })
 
 test_that("pixels that are mostly cleared right-of-way are not scored", {
@@ -90,7 +99,7 @@ test_that("pixels that are mostly cleared right-of-way are not scored", {
   d <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_canopy_frac = 0.5)
   s <- sf::st_drop_geometry(d$segments)
   s <- s[order(s$seg_id), ]
-  expect_equal(s$ndvi[1], 0.8, tolerance = 1e-6)
+  expect_true(s$ndvi[1] > 0.78 && s$ndvi[1] < 0.84)
   expect_equal(s$canopy_px[2], 0)
   expect_true(is.na(s$ndvi[2]))
   expect_true(is.na(s$dry_canopy[2]))
@@ -115,13 +124,91 @@ test_that("cells beyond the corridor half-width don't count as bare ground", {
 test_that("a segment with only a few square metres of canopy gets no percentile", {
   r <- corridor(function(x, y) ifelse(x < x0 + 100 | (abs(y - y0) < 1 & abs(x - x0 - 150) < 1), 9, NA))
   sc <- screen(r)
-  d <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_canopy_frac = 0, min_ref_px = 1)
+  d <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_canopy_frac = 0, min_ref_px = 1,
+                      min_support = 0)
   s <- sf::st_drop_geometry(d$segments)
   s <- s[order(s$seg_id), ]
   expect_lt(s$canopy_m2[2], 5)
   expect_false(is.na(s$ndvi[2]))
   expect_true(is.na(s$ndvi_pct[2]))
   expect_true(is.na(s$dry_canopy[2]))
+})
+
+test_that("a mostly unobserved pixel is not scored, however green its sliver (#26)", {
+  # Canopy only within 3 m of the line, bare elsewhere. With a 3 m corridor
+  # each pixel row beside the line is 10% observed (3 of 30 cell rows); all
+  # of that is canopy.
+  r <- corridor(function(x, y) ifelse(abs(y - y0) <= 3, 9, NA))
+  sc <- screen(r)
+  tight <- canopy_dryness(composite(), r, sc$profile, sc$risk, corridor_m = 3, min_ref_px = 1)
+  wide <- canopy_dryness(composite(), r, sc$profile, sc$risk, corridor_m = 50, min_ref_px = 1)
+  rows <- function(d) abs(sf::st_coordinates(d$pixels)[, 2] - y0) < 30 &
+    sf::st_coordinates(d$pixels)[, 1] > x0 + 10 & sf::st_coordinates(d$pixels)[, 1] < x0 + 190
+  tp <- tight$pixels[rows(tight), ]
+  expect_true(all(tp$canopy_frac > 0.95))        # the sliver is all canopy...
+  expect_true(all(abs(tp$coverage - 0.1) < 0.02)) # ...but it is a sliver
+  expect_false(any(tp$scored))
+  wp <- wide$pixels[rows(wide), ]
+  expect_true(all(abs(wp$coverage - 1) < 1e-6))
+  expect_false(any(wp$scored))                    # 20% canopy: canopy-fraction gate
+  g <- attr(tight$segments, "landsat")$n_px_excluded
+  expect_gt(g[["coverage"]], 0)
+})
+
+test_that("structure surroundings are unknown, not canopy, and still count as observed (#26)", {
+  r <- corridor(function(x, y) rep(9, length(x)))
+  sc <- screen(r)
+  pole <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(x0 + 50.5, y0 + 2.5)), crs = utm))
+  plain <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_ref_px = 1)
+  masked <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_ref_px = 1,
+                           structures = pole, structure_mask_m = 8)
+  s0 <- sf::st_drop_geometry(plain$segments)
+  s1 <- sf::st_drop_geometry(masked$segments)
+  expect_lt(s1$canopy_m2[s1$seg_id == 1], s0$canopy_m2[s0$seg_id == 1])
+  expect_equal(s1$canopy_m2[s1$seg_id == 2], s0$canopy_m2[s0$seg_id == 2])
+  inside <- masked$pixels$coverage >= 0.999
+  expect_equal(sum(inside), sum(plain$pixels$coverage >= 0.999))
+  expect_equal(attr(masked$segments, "landsat")$structure_mask_m, 8)
+})
+
+test_that("a one-cell spike is not canopy for the dryness weights (#26)", {
+  r <- corridor(function(x, y) ifelse(x < x0 + 100, 9, NA))
+  spike <- terra::cellFromXY(r$chm, cbind(x0 + 150.5, y0 + 0.5))
+  r$chm[spike] <- 9
+  sc <- screen(r)
+  filtered <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_canopy_frac = 0, min_ref_px = 1)
+  raw <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_canopy_frac = 0, min_ref_px = 1,
+                        min_support = 0)
+  px2 <- function(d) sf::st_drop_geometry(d$segments)$canopy_px[d$segments$seg_id == 2]
+  expect_equal(px2(filtered), 0L)
+  expect_equal(px2(raw), 1L)
+})
+
+test_that("a segment resting on one pixel keeps its index but gets no percentile (#26)", {
+  # West half closed canopy; east half bare but for a 4 x 4 m block under
+  # the line inside a single Landsat pixel (x 130-160, y 0-30).
+  r <- corridor(function(x, y) ifelse(x < x0 + 100 | (x >= x0 + 140 & x < x0 + 144 & y >= y0 + 1 & y < y0 + 5), 9, NA))
+  sc <- screen(r)
+  one <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_canopy_frac = 0, min_ref_px = 1)
+  any_px <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_canopy_frac = 0, min_ref_px = 1,
+                           min_canopy_px = 1)
+  s <- sf::st_drop_geometry(one$segments)
+  s <- s[order(s$seg_id), ]
+  expect_equal(s$canopy_px[2], 1L)
+  expect_gte(s$canopy_m2[2], 5)
+  expect_false(is.na(s$ndvi[2]))
+  expect_true(is.na(s$ndvi_pct[2]))
+  s2 <- sf::st_drop_geometry(any_px$segments)
+  expect_false(is.na(s2$ndvi_pct[s2$seg_id == 2]))
+})
+
+test_that("pixels with too few clear observations are not scored (#26)", {
+  r <- corridor(function(x, y) rep(9, length(x)))
+  sc <- screen(r)
+  d <- canopy_dryness(composite(), r, sc$profile, sc$risk, min_ref_px = 1, min_obs = 9) # n_obs is 8
+  expect_false(any(d$pixels$scored))
+  expect_equal(attr(d$segments, "landsat")$n_px_excluded[["n_obs"]], nrow(d$pixels))
+  expect_true(all(is.na(d$segments$ndvi)))
 })
 
 test_that("too few canopy pixels in the corridor leaves percentiles undefined", {
