@@ -198,3 +198,16 @@ test_that("conductor returns crossing canopy are kept out of the canopy model", 
   expect_lt(terra::extract(ribbon$chm, at_tree)[, 1], 8.5)
   expect_gt(max(terra::extract(ribbon$chm, cbind(x0 + 15 + c(-1, 0, 1), y0 + 3))[, 1], na.rm = TRUE), 11)
 })
+
+test_that("structure-masked cells stay unobserved through the crown-support filter (#27)", {
+  # Closed 9 m canopy everywhere, with a structure in the wire zone of
+  # segment 1. Before the fix, the masked disc's outer ring came back as 0 m
+  # (bare ground) and pulled wire_zone_cover below 1.
+  r <- make_rasters(data.frame(x = numeric(), y = numeric(), h = numeric()))
+  r$chm <- terra::setValues(r$chm, 9)
+  pole <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(x0 + 50.5, y0 + 4.5)), crs = utm))
+  rk <- risk_for(r, structures = pole, structure_mask_m = 4, tree_ws_m = 3)
+  s <- sf::st_drop_geometry(rk$segments)
+  expect_equal(s$wire_zone_cover[s$seg_id == 1], 1)
+  expect_equal(s$wire_zone_cover[s$seg_id == 2], 1)
+})

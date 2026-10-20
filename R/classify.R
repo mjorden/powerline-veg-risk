@@ -139,12 +139,15 @@ cv_point_classifier <- function(feat, n_per_class = 20000, num_trees = 200, mtry
 #' @param model A model from [train_point_classifier()].
 #' @param feat Features table.
 #' @return `feat` with `pred` (factor) and one `p_<class>` probability column
-#'   per class (prior-corrected, see [classify_probs()]).
+#'   for every class in `label_levels` (prior-corrected, see
+#'   [classify_probs()]); classes absent from training get probability 0.
 #' @export
 predict_points <- function(model, feat) {
   feat <- data.table::copy(feat)
   p <- classify_probs(model, feat)
-  for (cl in colnames(p)) feat[, (paste0("p_", cl)) := p[, cl]]
+  for (cl in label_levels) {
+    feat[, (paste0("p_", cl)) := if (cl %in% colnames(p)) p[, cl] else 0]
+  }
   feat[, pred := factor(colnames(p)[max.col(p, "first")], levels = label_levels)]
   feat[]
 }
@@ -193,17 +196,25 @@ avg_precision <- function(score, positive, w = rep(1, length(score))) {
 #' are excluded. Vegetation usually dominates (prevalence near 1), so its F1
 #' cannot show skill: an always-"vegetation" baseline is reported alongside,
 #' with balanced accuracy and Cohen's kappa over the mapped classes. A class
-#' that is never predicted has precision 0, not NA.
+#' that is never predicted has precision 0, not NA. A class with no vendor
+#' points (e.g. no buildings on a rural corridor) has `n = 0` and `NA` recall
+#' and F1, and is left out of balanced accuracy.
 #'
 #' @param labels Factor of labels to score (e.g. `pred$pred` or `feat$label`).
-#' @param vendor_class Integer ASPRS class of the same points.
+#' @param vendor_class Integer ASPRS class of the same points; must have the
+#'   same length as `labels`.
 #' @param map Named list mapping package labels to vendor class codes.
 #' @return A list with `metrics` (per-class precision, recall, F1, n, plus
 #'   `balanced_accuracy` and `kappa`), `baseline` (the same for predicting
-#'   the majority class everywhere) and `confusion`.
+#'   the majority class everywhere) and `confusion`. With no points in a
+#'   mapped vendor class, every metric is `NA` (with a warning).
 #' @export
 evaluate_vendor_classes <- function(labels, vendor_class,
                                     map = list(vegetation = 3:5, building = 6L)) {
+  if (length(labels) != length(vendor_class)) {
+    rlang::abort(sprintf("`labels` (%d) and `vendor_class` (%d) must have the same length.",
+                         length(labels), length(vendor_class)))
+  }
   truth <- rep(NA_character_, length(vendor_class))
   for (nm in names(map)) truth[vendor_class %in% map[[nm]]] <- nm
   keep <- !is.na(truth)
@@ -215,20 +226,23 @@ evaluate_vendor_classes <- function(labels, vendor_class,
       tp <- sum(truth == cl & pred == cl)
       np <- sum(pred == cl)
       nt <- sum(truth == cl)
-      prec <- if (np > 0) tp / np else 0
-      rec <- tp / nt
-      data.frame(class = cl, n = nt, prevalence = nt / length(truth), predicted = np,
-                 precision = prec, recall = rec,
-                 f1 = if (prec + rec > 0) 2 * prec * rec / (prec + rec) else 0)
+      prec <- if (np > 0) tp / np else if (nt > 0) 0 else NA_real_
+      rec <- if (nt > 0) tp / nt else NA_real_
+      data.frame(class = cl, n = nt, prevalence = if (length(truth)) nt / length(truth) else NA_real_,
+                 predicted = np, precision = prec, recall = rec,
+                 f1 = if (is.na(rec)) NA_real_ else if (prec + rec > 0) 2 * prec * rec / (prec + rec) else 0)
     }))
     # Cohen's kappa over the mapped classes, other predictions counting as wrong
     po <- mean(pred == truth)
     pe <- sum(vapply(names(map), function(cl) mean(truth == cl) * mean(pred == cl), 0))
-    out$balanced_accuracy <- mean(out$recall)
-    out$kappa <- (po - pe) / (1 - pe)
+    out$balanced_accuracy <- if (any(!is.na(out$recall))) mean(out$recall, na.rm = TRUE) else NA_real_
+    out$kappa <- if (length(truth) && pe < 1) (po - pe) / (1 - pe) else NA_real_
     out
   }
-  majority <- names(which.max(table(truth)))
+  if (length(truth) == 0) {
+    rlang::warn("No points have a vendor class in `map`; every metric is NA.")
+  }
+  majority <- if (length(truth)) names(which.max(table(truth))) else character()
   list(metrics = score(lab), baseline = score(rep(majority, length(truth))),
        confusion = table(vendor = truth, label = lab))
 }
