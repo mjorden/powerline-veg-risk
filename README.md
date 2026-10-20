@@ -139,6 +139,7 @@ Each segment reports `frac_observed` (across the corridor) and `frac_observed_un
 
 - **3 robust grow-in candidates.** The top one (about 1.01–1.06 km along the line, conductor measured along 41% of it) has a conductor about 15 m up, leaving a low H-frame on the canyon floor, beside riparian cottonwoods up to 27 m tall. The other two have trees of 20–29 m that exceed even the highest plausible conductor. They are the places to verify with imagery or a field visit first.
 - **27 segments are bound-dependent.** Whether they need work depends on where the conductor actually is, which this acquisition doesn't show.
+- **The LiDAR saw the corridor.** Every segment has at least 94% of its corridor and 85% of its grow-in zone observed (median 100%), so none is tiered `no data`.
 
 | class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
 |---|---:|---:|---:|---:|---:|
@@ -150,12 +151,12 @@ With only a few hundred metres of labelled conductor and five structures, wires 
 
 ![Sunshine cross-section](man/figures/sunshine_cross_section.png)
 
-**The grown-in canopy is not the dry canopy.** A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, gives 141 canopy-dominated 30 m pixels in the corridor. 23 of the 30 segments have enough grown-in canopy to rank; NDVI and NDMI agree closely across them (r = 0.89).
+**The grown-in canopy is not the dry canopy.** A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, gives 142 canopy-dominated 30 m pixels in the corridor. 23 of the 30 segments have enough grown-in canopy to rank; NDVI and NDMI agree closely across them (r = 0.89).
 
 | robust grow-in candidate | NDVI percentile | NDMI percentile |
 |---|---:|---:|
-| 0.10–0.15 km, trees to 20 m | 0.36 | 0.49 |
-| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 0.50 | 0.81 |
+| 0.10–0.15 km, trees to 20 m | 0.37 | 0.49 |
+| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 0.50 | 0.80 |
 | 1.06–1.11 km, canyon floor, trees to 29 m | 0.89 | 0.96 |
 
 - **None of the 3 robust grow-in candidates is dry.** The two worst encroachments are among the wettest canopy on the line: riparian trees on the canyon floor.
@@ -193,18 +194,18 @@ With only a few hundred metres of labelled conductor and five structures, wires 
 
 Wires transfer across space here: average precision 0.88 against a no-skill 0.10, and 0.83 even without the height and echo features that encode the labelling rule. Structures (31 lattice towers) still don't.
 
-**Against the vendor's classes.** These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can't show skill: predicting "vegetation" everywhere scores 0.993.
+**Against the vendor's classes.** These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can't show skill: predicting "vegetation" everywhere scores 0.992.
 
 | | vegetation F1 | building F1 | balanced accuracy | Cohen's κ |
 |---|---:|---:|---:|---:|
-| always "vegetation" (baseline) | 0.993 | 0 | 0.50 | 0 |
-| weak labels | 0.948 | 0 | 0.46 | −0.01 |
-| model trained on weak labels | 0.955 | 0 | 0.46 | −0.01 |
-| Colorado model, transferred | 0.993 | 0 | 0.50 | 0.00 |
-| **trained on vendor labels (spatial CV)** | 0.998 | **0.87** (AP 0.95) | 0.89 | — |
+| always "vegetation" (baseline) | 0.992 | 0 | 0.50 | 0 |
+| weak labels | 0.950 | 0 | 0.46 | −0.01 |
+| model trained on weak labels | 0.957 | 0 | 0.47 | −0.01 |
+| Colorado model, transferred | 0.992 | 0 | 0.50 | 0.00 |
+| **trained on vendor labels (spatial CV)** | 0.998 | **0.88** (AP 0.95) | 0.89 | — |
 
-- **On vegetation vs building, the weak-label pipeline has no skill at this site.** OSM maps one building in the corridor, so there are no building labels to learn from. The vendor's labels would buy a building F1 of 0.87. The weak models' lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.
-- **The Colorado model doesn't transfer.** With its own class prior it recalls 0% of Nashville's conductor returns. Threshold-free, its wire average precision is 0.22 against a 0.10 baseline (the Nashville model: 0.87). Its 0.993 vegetation F1 is exactly the baseline.
+- **On vegetation vs building, the weak-label pipeline has no skill at this site.** OSM maps one building in the corridor, so there are no building labels to learn from. The vendor's labels would buy a building F1 of 0.88. The weak models' lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.
+- **The Colorado model doesn't transfer.** With its own class prior it recalls 0% of Nashville's conductor returns. Threshold-free, its wire average precision is 0.22 against a 0.10 baseline (the Nashville model: 0.87). Its 0.992 vegetation F1 is exactly the baseline.
 
 **Risk screen.** The same segments, with three different canopy models:
 
@@ -216,6 +217,7 @@ Wires transfer across space here: average precision 0.88 against a no-skill 0.10
 
 - **The delivered classes would send crews to every span.** Removing conductor returns is the whole grow-in correction (39 → 0). Consensus labelling (model and weak rules agreeing on vegetation, vendor buildings removed) then trims fall-in from 10 segments to 7.
 - **No grow-in.** The managed right-of-way is clear under the conductors.
+- **The 32 clear segments were seen, not assumed.** Every segment has at least 91% of its corridor and of its grow-in zone observed (median 99%), so none is tiered `no data`. The lowest segment (0.36–0.41 km, 91% under the line) is still 16 points above the 75% threshold.
 - **24 strike trees across 7 segments,** 28–39 m from the centreline, the same under both bounds because the conductor is measured. They are the list to verify.
 - **The conductor envelope has to cover every phase.** An earlier run capped it at 15 m while one outer phase sits up to ~19 m from the OSM centreline. That left outer-phase returns in the canopy model, which showed up as 2 grow-in segments and 4 extra strike trees at the envelope edge. Widening the grow-in zone to 21 m removed all of them.
 

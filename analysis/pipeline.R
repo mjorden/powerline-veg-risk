@@ -239,8 +239,8 @@ run_case_study <- function(cfg) {
   # cfg$landsat = list(years, months, dry_index): a dry-season median composite
   # over the corridor, read only where LiDAR says canopy has grown in.
   dryness <- NULL
-  if (!is.null(cfg$landsat)) {
-    lc <- cfg$landsat
+  if (!is.null(cfg[["landsat"]])) {
+    lc <- cfg[["landsat"]]
     comp_path <- file.path(out, "landsat_composite.tif")
     scenes_path <- file.path(out, "landsat_scenes.csv")
     if (file.exists(comp_path) && file.exists(scenes_path)) {
@@ -272,8 +272,8 @@ run_case_study <- function(cfg) {
   # strike trees the dry, high-wind hours of the record would throw into the
   # line. The hourly record is cached; analysis/watchlist.R applies the same
   # geometry to the live NWS forecast.
-  if (!is.null(cfg$wind)) {
-    wc <- cfg$wind
+  if (!is.null(cfg[["wind"]])) { # [[ ]]: cfg$wind would partial-match window_m
+    wc <- cfg[["wind"]]
     wind_path <- file.path(out, "wind_hourly.csv")
     if (file.exists(wind_path)) {
       wind <- fread(wind_path)
