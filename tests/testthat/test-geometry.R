@@ -21,6 +21,25 @@ test_that("segment_lines covers the line with near-equal segments", {
   expect_equal(nrow(seg), 4)
   expect_equal(sum(seg$length_m), 230, tolerance = 1e-6)
   expect_true(all(abs(seg$length_m - 57.5) < 1e-6))
+  expect_equal(seg$s_from_m, c(0, 57.5, 115, 172.5), tolerance = 1e-6)
+  expect_equal(seg$s_to_m[4], 230, tolerance = 1e-6)
+})
+
+test_that("segments keep the OSM way they came from, and line ids follow input order (#31)", {
+  south <- sf::st_linestring(rbind(c(500000, 4400000), c(500120, 4400000)))
+  north <- sf::st_linestring(rbind(c(500000, 4400500), c(500120, 4400500)))
+  ways <- sf::st_sf(osm_id = c("n1", "s2"), name = c("North", "South"), voltage_kv = c(115, 230),
+                    geometry = sf::st_sfc(north, south, crs = utm))
+  seg <- segment_lines(ways, utm, seg_m = 50)
+  expect_true(all(c("osm_id", "name", "voltage_kv", "s_from_m", "s_to_m") %in% names(seg)))
+  # line_id 1 is the first input feature (north), whatever order the union gives.
+  expect_true(all(seg$osm_id[seg$line_id == 1] == "n1"))
+  expect_true(all(seg$osm_id[seg$line_id == 2] == "s2"))
+  expect_equal(unname(seg$voltage_kv[seg$name == "South"]), rep(230, 2))
+  # Geometry-only input still works, without the tag columns.
+  bare <- segment_lines(sf::st_geometry(ways), utm, seg_m = 50)
+  expect_false("osm_id" %in% names(bare))
+  expect_equal(nrow(bare), 4)
 })
 
 test_that("assign_blocks never splits a block across folds", {

@@ -29,22 +29,42 @@
 #' @param seg_m Target segment length in metres. Each line is split into
 #'   `floor(length / seg_m)` equal segments, so segments are between `seg_m`
 #'   and `2 * seg_m` long.
-#' @return `sf` with `seg_id`, `line_id`, `length_m`.
+#' @return `sf` with `seg_id`, `line_id` (one per merged line, numbered in
+#'   the order of the first input feature touching each, not union order),
+#'   `s_from_m` / `s_to_m` (chainage of the segment's ends along its merged
+#'   line, metres), `length_m`, and, when `lines` is an `sf` carrying them,
+#'   `osm_id`, `name`, `voltage_kv` and `operator` of the nearest input
+#'   line, so a segment can be traced back to the OSM way it came from.
 #' @export
 segment_lines <- function(lines, crs, seg_m = 50) {
   m <- crs_m_per_unit(crs)
+  src <- if (inherits(lines, "sf")) sf::st_transform(lines, crs) else NULL
   parts <- merge_lines(sf::st_transform(sf::st_geometry(lines), crs))
+  if (!is.null(src) && nrow(src) > 1 && length(parts) > 1) {
+    first <- vapply(seq_along(parts), function(i) {
+      hit <- which(lengths(sf::st_intersects(sf::st_geometry(src), parts[i])) > 0)
+      if (length(hit)) min(hit) else NA_integer_
+    }, 1L)
+    parts <- parts[order(first)]
+  }
   out <- lapply(seq_along(parts), function(i) {
     len <- as.numeric(sf::st_length(parts[i])) * m
     n <- max(1L, floor(len / seg_m))
     br <- seq(0, 1, length.out = n + 1)
     g <- do.call(c, lapply(seq_len(n), function(j) lwgeom::st_linesubstring(parts[i], br[j], br[j + 1])))
-    sf::st_sf(line_id = i, geometry = g)
+    sf::st_sf(line_id = i, s_from_m = br[-length(br)] * len, s_to_m = br[-1] * len, geometry = g)
   })
   out <- do.call(rbind, out)
   out$seg_id <- seq_len(nrow(out))
   out$length_m <- as.numeric(sf::st_length(out)) * m
-  out[, c("seg_id", "line_id", "length_m", "geometry")]
+  cols <- c("seg_id", "line_id", "s_from_m", "s_to_m", "length_m")
+  keep <- if (is.null(src)) character() else intersect(c("osm_id", "name", "voltage_kv", "operator"), names(src))
+  if (length(keep)) {
+    nn <- sf::st_nearest_feature(out, src)
+    for (k in keep) out[[k]] <- sf::st_drop_geometry(src)[[k]][nn]
+    cols <- c(cols, keep)
+  }
+  out[, c(cols, "geometry")]
 }
 
 #' Build terrain and vegetation-only canopy height rasters

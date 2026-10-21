@@ -51,6 +51,7 @@ if (nrow(hours) == 0) {
 meta <- data.frame(
   generated_at = format(now, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
   nws_office = attr(fc, "office"), nws_grid = attr(fc, "grid"),
+  nws_updated = if (is.null(attr(fc, "updated"))) NA_character_ else attr(fc, "updated"),
   forecast_from = format(min(fc$time), "%Y-%m-%dT%H:%MZ", tz = "UTC"),
   forecast_to = format(max(fc$time), "%Y-%m-%dT%H:%MZ", tz = "UTC"),
   past_hours_dropped = st$n_past_hours_dropped,

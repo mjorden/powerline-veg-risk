@@ -76,10 +76,13 @@ run_case_study <- function(cfg) {
       if (xy[1, 2] < xy[nrow(xy), 2]) g <- st_sfc(st_linestring(xy[nrow(xy):1, 1:2]), crs = crs)
     }
     len <- as.numeric(st_length(g)) * m
-    study <- st_sf(geometry = lwgeom::st_linesubstring(g, cfg$window_m[1] / len, cfg$window_m[2] / len))
+    # The window is cut from one merged way; keep that way's tags.
+    study <- st_sf(st_drop_geometry(study)[1, , drop = FALSE],
+                   geometry = lwgeom::st_linesubstring(g, cfg$window_m[1] / len, cfg$window_m[2] / len))
   }
-  study <- st_intersection(st_geometry(study), st_buffer(extent, -cfg$half_width_m / m))
-  study <- st_sf(geometry = study)
+  study <- study[, intersect(c("osm_id", "name", "voltage_kv", "operator"), names(study))]
+  st_agr(study) <- "constant"
+  study <- st_intersection(study, st_buffer(extent, -cfg$half_width_m / m))
   aoi <- st_buffer(study, 100 / m)
   structures <- cache(file.path(raw, "osm_structures.geojson"), osm_power_structures(aoi))
   buildings  <- cache(file.path(raw, "osm_buildings.geojson"), osm_buildings(aoi))
