@@ -10,3 +10,5 @@
 ^docs$
 ^pkgdown$
 ^rfcs$
+^vignettes/articles$
+^\.claude$

@@ -54,7 +54,12 @@ adjacent measured bins.}
 \value{
 data.frame of vertices: \code{line_id}, \code{x}, \code{y}, \code{tx}, \code{ty} (unit
 tangent along the line), \code{s_m}, \code{seg_id}, \code{ground}, \code{z_lo}, \code{z_hi},
-\code{src}.
+\code{src}. The attribute \code{bins} is a data frame with one row per line
+counting the chainage bins that held conductor returns (\code{n_bins}) and
+how many each sanity check rejected (\code{n_too_few}, \code{n_below_floor},
+\code{n_implausible}), with \code{n_measured} the bins that survived, so a
+profile that silently lost most of its returns can be told from one
+that never had them.
 }
 \description{
 Conductor returns are points the wire rule labelled (\code{label == "wire"}) or

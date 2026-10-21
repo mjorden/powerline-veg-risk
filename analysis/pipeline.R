@@ -164,6 +164,12 @@ run_case_study <- function(cfg) {
                                min_ground_clear_m = cfg$min_ground_clear_m, attach_m = cfg$attach_m)
   step(sprintf("conductor measured along %.0f%% of the line; upper bound unknown along %.0f%%",
                100 * mean(profile$src == "measured"), 100 * mean(is.infinite(profile$z_hi))))
+  bl <- colSums(attr(profile, "bins")[, -1])
+  step(sprintf("conductor bins: %d with returns; rejected %d (too few points), %d (below code minimum), %d (implausible slope); %d measured",
+               bl[["n_bins"]], bl[["n_too_few"]], bl[["n_below_floor"]], bl[["n_implausible"]], bl[["n_measured"]]))
+  # Parameters that assess_risk() and wind_fall_exposure() must agree on
+  # come from the config once (#21).
+  growth_m <- if (is.null(cfg$growth_m)) 0 else cfg$growth_m
 
   # Conductor envelope from where conductor returns actually are, capped at
   # the grow-in zone so side trees keep their tops for the fall-in test.
@@ -264,6 +270,7 @@ run_case_study <- function(cfg) {
     r <- corridor_rasters(las, pr, res_m = 1, profile = if (exclude) profile,
                           envelope_m = envelope_m, drop = drop)
     list(rasters = r, risk = assess_risk(r, profile, segments, phase_offset_m = cfg$phase_offset_m,
+                                         growth_m = growth_m,
                                          under_line_m = cfg$under_line_m, wire_zone_m = cfg$wire_zone_m,
                                          structures = mask_supports, structure_mask_m = cfg$structure_mask_m,
                                          coverage_m = cfg$half_width_m))
@@ -380,6 +387,7 @@ run_case_study <- function(cfg) {
     attr(fw, "lon") <- attr(wind, "lon")
     attr(fw, "lat") <- attr(wind, "lat")
     risk <- wind_fall_exposure(risk, profile, fw, phase_offset_m = cfg$phase_offset_m,
+                               growth_m = growth_m,
                                spread_deg = if (is.null(wc$spread_deg)) 15 else wc$spread_deg)
     wi <- attr(risk$segments, "wind")
     step(sprintf("wind: %d fire-weather hours of %d (gust >= %.1f m/s, RH <= %g%%); grid convergence %.2f deg",
@@ -387,7 +395,7 @@ run_case_study <- function(cfg) {
     for (b in c("lo", "hi")) {
       s <- risk$trees[[paste0("strike_", b)]]
       h <- risk$trees[[paste0("wind_hit_", b)]][s]
-      step(sprintf("  %s bound: %d strike trees, %d windward (>= %.0f%% of hours), %.1f expected per fire-weather hour",
+      step(sprintf("  %s bound: %d strike trees, %d windward (>= %.0f%% of hours), wind-weighted count %.1f",
                    b, sum(s), sum(h >= wi$windward_min), 100 * wi$windward_min, sum(h)))
     }
     plot_wind_exposure(risk, rasters, bound = "lo", file = fig("wind_exposure"))
@@ -406,6 +414,7 @@ run_case_study <- function(cfg) {
                   envelope_m = envelope_m, envelope_needed = envelope_needed,
                   label_table = table(feat$label, useNA = "ifany"), pred_table = table(pred$pred),
                   frac_measured = mean(profile$src == "measured"),
+                  conductor_bins = attr(profile, "bins"),
                   frac_unbounded = mean(is.infinite(profile$z_hi)),
                   priority = table(risk$segments$priority),
                   priority_by_confidence = table(risk$segments$priority, risk$segments$confidence),

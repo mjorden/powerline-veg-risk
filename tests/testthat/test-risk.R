@@ -59,6 +59,30 @@ test_that("an upslope tree is more dangerous than the same tree on flat ground",
   expect_true(up$trees$strike)
 })
 
+test_that("fall-in reach is the minimum 3D distance along the span, not at the nearest station (#19)", {
+  trees <- data.frame(x = x0 + 20.5, y = y0 + 13.5, h = 29)
+  r <- make_rasters(trees)
+  s <- segs()
+  prof <- line_vertex_table(s, utm)
+  prof$seg_id <- 1L
+  prof$ground <- 0
+  prof$src <- "measured"
+  # The conductor is 30 m up at the tree's station and descends 0.5 m per
+  # metre eastward: a few metres along the line it is closer in 3D.
+  prof$z_lo <- prof$z_hi <- pmax(30 - 0.5 * (prof$s_m - 20), 5)
+  rk <- assess_risk(r, prof, s, phase_offset_m = 3, tree_ws_m = 3)
+  tt <- rk$trees
+  expect_equal(nrow(tt), 1)
+  # Nearest station: sqrt(10.5^2 + 30^2) = 31.8 > 29. About 13 m along:
+  # horizontal sqrt(13.5^2 + 13^2) - 3 = 15.7, vertical 23.5 -> 28.3 < 29.
+  expect_gt(sqrt(10.5^2 + 30^2), 29)
+  expect_equal(tt$reach_lo_m, 28.3, tolerance = 0.01)
+  expect_lt(tt$dz_lo_m, 30)
+  expect_true(tt$strike)
+  # The horizontal distance reported is still the one to the line itself.
+  expect_equal(tt$dh_m, 13.5, tolerance = 0.01)
+})
+
 test_that("canopy under the line triggers grow-in priority", {
   trees <- data.frame(x = x0 + 25.5, y = y0 + 0.5, h = 9) # 1 m below a 10 m conductor
   rk <- risk_for(make_rasters(trees), tree_ws_m = 3, clearance_target_m = 4.6)
@@ -91,7 +115,37 @@ test_that("zero treetops returns a full, empty trees schema", {
   r <- make_rasters(data.frame(x = x0 + 1, y = y0 + 40, h = 0.5))
   rk <- risk_for(r)
   expect_equal(nrow(rk$trees), 0)
-  expect_true(all(c("strike", "strike_lo", "strike_hi", "reach_lo_m") %in% names(rk$trees)))
+  expect_true(all(c("tree_id", "strike", "strike_lo", "strike_hi", "reach_lo_m") %in% names(rk$trees)))
+})
+
+test_that("strike trees carry a stable id and the profile reports its rejected bins (#31, #24)", {
+  trees <- data.frame(x = x0 + c(50.5, 150.5), y = y0 + 13.5, h = c(15, 12))
+  rk1 <- risk_for(make_rasters(trees), phase_offset_m = 3, tree_ws_m = 3)
+  rk2 <- risk_for(make_rasters(trees[2:1, ]), phase_offset_m = 3, tree_ws_m = 3)
+  expect_equal(length(unique(rk1$trees$tree_id)), 2)
+  expect_setequal(rk1$trees$tree_id, rk2$trees$tree_id)   # same data, same ids, any order
+
+  s <- segs()
+  dtm <- make_rasters(trees)$dtm
+  # Returns along x = 0..100: a healthy run at 12 m, one bin far below the
+  # code minimum, one lone spike, and one bin with too few points.
+  w <- rbind(
+    data.frame(X = x0 + seq(0.5, 49.5, 0.5), Y = y0, height_m = 12),
+    data.frame(X = x0 + 55 + 0:4 * 0.5, Y = y0, height_m = 2),    # below ground + 10 m floor
+    data.frame(X = x0 + 75 + 0:4 * 0.5, Y = y0, height_m = 40),   # implausible spike
+    data.frame(X = x0 + 92, Y = y0, height_m = 12)                # one point: too few
+  )
+  w <- data.table::as.data.table(w)
+  w[, `:=`(pred = factor("wire", levels = label_levels), label = factor("wire", levels = label_levels))]
+  prof <- conductor_profile(w, s, dtm, min_ground_clear_m = 10, attach_m = 10, search_m = 15)
+  b <- attr(prof, "bins")
+  expect_equal(nrow(b), 1)
+  expect_equal(b$n_bins, 13)
+  expect_equal(b$n_too_few, 1)
+  expect_equal(b$n_below_floor, 1)
+  expect_equal(b$n_implausible, 1)
+  expect_equal(b$n_measured, 10)
+  expect_equal(b$n_measured + b$n_too_few + b$n_below_floor + b$n_implausible, b$n_bins)
 })
 
 test_that("taut-span upper bound bridges a gully instead of following it", {
