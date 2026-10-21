@@ -148,9 +148,16 @@ theme_vegrisk <- function(base_size = 10, style = vegrisk_style()) {
 # Short horizontal colour bar with the title on top, so every key reads the
 # same way.
 colour_bar <- function(order) {
-  ggplot2::guide_colourbar(order = order, title.position = "top",
+  # Always a horizontal bar, whichever side of the map the legend sits on.
+  ggplot2::guide_colourbar(order = order, title.position = "top", direction = "horizontal",
+                           label.position = "bottom",
                            barwidth = ggplot2::unit(9, "lines"), barheight = ggplot2::unit(0.5, "lines"))
 }
+
+# Characters that must stay out of the source as literals (R CMD check wants
+# ASCII) and out of "\u" escapes (which some editors unescape in place).
+sym <- list(sq = intToUtf8(178), ge = intToUtf8(8805), le = intToUtf8(8804), pm = intToUtf8(177),
+            deg = intToUtf8(176), larr = intToUtf8(8592), rarr = intToUtf8(8594))
 
 # A metric scale bar at the bottom-left of a map instead of a graticule:
 # the one thing a corridor map's axes carried (distance) in a form that
@@ -311,7 +318,7 @@ plot_risk_map <- function(rasters, risk, structures = NULL, encroach_limits = c(
       ggplot2::geom_sf(data = pos, ggplot2::aes(colour = encroach_lo_m2, linetype = certain),
                        linewidth = 1.3, lineend = "butt") +
       scale_colour_vegrisk_encroach(limits = c(0, top), oob = scales::squish, na.value = pal$nodata, pal = pal,
-                                    name = "Canopy in clearance envelope\nif conductor at code minimum (m00b2)",
+                                    name = sprintf("Canopy in clearance envelope\nif conductor at code minimum (m%s)", sym$sq),
                                     breaks = scales::breaks_extended(4), guide = colour_bar(2))
   }
   p <- p +
@@ -328,8 +335,9 @@ plot_risk_map <- function(rasters, risk, structures = NULL, encroach_limits = c(
   if (any(seg$certain == "bound-dependent")) notes <- c(notes, "Dashed segments: tier depends on the unknown conductor elevation.")
   if (any(gap)) notes <- c(notes, "Dotted segments: too little of the corridor observed to claim no risk.")
   if (!is.null(un)) {
-    notes <- c(notes, sprintf("%s m00b2 unobserved by the LiDAR or left out as uncertain (grey; not bare ground).",
-                              format(round(nrow(un) * prod(terra::res(rasters$unobserved)) * m^2), big.mark = ",")))
+    notes <- c(notes, sprintf("%s m%s unobserved by the LiDAR or left out as uncertain (grey; not bare ground).",
+                              format(round(nrow(un) * prod(terra::res(rasters$unobserved)) * m^2), big.mark = ","),
+                              sym$sq))
   }
   if (!is.null(st) && nrow(st) > 0) notes <- c(notes, "Crosses: supports used for the upper conductor bound.")
   p <- p +
@@ -406,8 +414,9 @@ plot_profile <- function(profile, risk = NULL, attach_m = NA, line_id = NULL, fi
     ggplot2::geom_line(ggplot2::aes(y = ground), colour = pal$ink2) +
     ggplot2::geom_line(data = meas, ggplot2::aes(y = z_lo, group = run), colour = pal$conductor,
                        linewidth = 1.1, lineend = "round") +
-    ggplot2::annotate("text", x = max(pr$s_m), y = pr$ground[nrow(pr)], label = "ground",
-                      hjust = 1.05, vjust = 1.6, size = 3, colour = pal$ink2, family = pal$text_family)
+    # Below the ground line at the start: nothing is ever drawn there.
+    ggplot2::annotate("text", x = min(pr$s_m), y = pr$ground[1], label = "ground",
+                      hjust = -0.1, vjust = 1.8, size = 3, colour = pal$ink2, family = pal$text_family)
   if (!is.null(trees)) {
     p <- p + ggplot2::geom_point(data = trees, ggplot2::aes(s_m, z, fill = both), shape = 24, size = 1.8,
                                  stroke = 0.3, colour = pal$ink, show.legend = FALSE) +
@@ -416,8 +425,8 @@ plot_profile <- function(profile, risk = NULL, attach_m = NA, line_id = NULL, fi
   notes <- c(
     if (nrow(meas)) "Thick line: conductor from classified returns (5 m bins, interpolated across short gaps).",
     if (nrow(bnd)) paste0("Band: ground + NESC clearance (thin line) up to the chord between supports",
-                          if (!is.na(attach_m)) sprintf(" at ground + %g m", attach_m) else "",
-                          "; no band = next support outside the data."),
+                          if (!is.na(attach_m)) sprintf(" at ground + %g m", attach_m) else "", "."),
+    if (nrow(bnd) && any(is.na(pr$z_hi) & pr$src == "bounded")) "No band: the next support lies outside the data.",
     if (!is.null(trees)) sprintf("Triangles: %d potential strike trees at their base elevation (ink = under both bounds).",
                                  nrow(trees)),
     if (length(lines) > 1) sprintf("Line %s of %d.", line_id, length(lines))
@@ -483,7 +492,8 @@ plot_cross_section <- function(las, pred, lines, file = NULL, at = 0.5,
   d <- d[order(d$class %in% c("wire", "structure")), ] # draw rare classes on top
 
   p <- ggplot2::ggplot(d, ggplot2::aes(across, z, colour = class)) +
-    ggplot2::geom_point(size = 0.35, alpha = 0.8) +
+    # show.legend = TRUE keeps a key for every class, present in the slab or not.
+    ggplot2::geom_point(size = 0.35, alpha = 0.8, show.legend = TRUE) +
     scale_colour_vegrisk_class(name = NULL, drop = FALSE, pal = pal, labels = c(low = "low (<2 m)")) +
     ggplot2::guides(colour = ggplot2::guide_legend(override.aes = list(size = 3, alpha = 1), nrow = 1)) +
     ggplot2::coord_equal() +
@@ -491,7 +501,7 @@ plot_cross_section <- function(las, pred, lines, file = NULL, at = 0.5,
                   subtitle = sprintf("%g m slab, %.0f%% along the line%s; random-forest predictions (ground from 3DEP)",
                                      width_m, 100 * at,
                                      if (length(parts) > 1) sprintf(" (line %d of %d)", line_id, length(parts)) else ""),
-                  x = sprintf("Distance from mapped centreline (m): %s 2190 2192 %s", compass(-v), compass(v)),
+                  x = sprintf("Distance from mapped centreline (m): %s %s %s %s", compass(-v), sym$larr, sym$rarr, compass(v)),
                   y = "Elevation (m)") +
     theme_vegrisk()
   save_or_return(p, file, 8, 4.5)
@@ -644,9 +654,12 @@ plot_canopy_dryness <- function(dryness, bound = c("hi", "lo"), title = NULL, fi
   # The dry cut on the key: the value at `dry_quantile` of the scored pixels.
   cut <- if (nrow(scored)) stats::quantile(scored$value, info$dry_quantile, names = FALSE) else NA
   rng <- if (nrow(scored)) range(scored$value) else c(0, 1)
-  brk <- sort(unique(c(pretty(rng, 3), cut)))
+  brk <- pretty(rng, 3)
   brk <- brk[brk >= rng[1] & brk <= rng[2]]
-  lab <- ifelse(!is.na(cut) & abs(brk - cut) < 1e-9, sprintf("%.2f dry cut", cut), format(brk))
+  # Round ticks that would collide with the cut's label give way to it.
+  if (!is.na(cut)) brk <- c(brk[abs(brk - cut) > 0.2 * diff(rng)], cut)
+  brk <- round(sort(unique(brk)), 3)
+  lab <- ifelse(!is.na(cut) & abs(brk - cut) < 1e-6, sprintf("%.2f\ndry cut", cut), formatC(brk, format = "f", digits = 2))
 
   p <- ggplot2::ggplot() +
     ggplot2::geom_tile(data = px[!px$scored, ], ggplot2::aes(X, Y), width = w, height = w,
@@ -668,8 +681,8 @@ plot_canopy_dryness <- function(dryness, bound = c("hi", "lo"), title = NULL, fi
     ggplot2::labs(title = title,
                   subtitle = sprintf(paste("Dry-season median of %d Landsat scenes, %s to %s.",
                                            "\nDry = segment in the lowest %.0f%% of the corridor's scored canopy pixels by %s.",
-                                           "\nGrown in = %s-bound grow-in tier from LiDAR. Grey pixels not scored:",
-                                           "< %.0f%% canopy, < %.0f%% observed by the LiDAR, or < %d clear looks."),
+                                           "\nGrown in = %s-bound grow-in tier from LiDAR.",
+                                           "\nGrey pixels not scored: < %.0f%% canopy, < %.0f%% observed by the LiDAR, or < %d clear looks."),
                                      length(info$scenes), format(dates[1], "%Y-%m"), format(dates[2], "%Y-%m"),
                                      100 * info$dry_quantile, toupper(key),
                                      if (bound == "lo") "pessimistic" else "optimistic",
@@ -748,23 +761,25 @@ plot_wind_exposure <- function(risk, rasters = NULL, bound = c("lo", "hi"), titl
     # Square-root radius: wedge area, which the eye reads, is proportional
     # to the share. The largest sector is labelled directly.
     ggplot2::scale_y_sqrt(breaks = NULL) +
-    ggplot2::annotate("text", x = top$angle, y = top$share, label = scales::percent(top$share, accuracy = 1),
-                      size = 2.8, colour = pal$ink, family = pal$text_family, vjust = -0.3) +
+    # The largest sector is labelled on its wedge, in paper so it reads on the fill.
+    ggplot2::annotate("text", x = top$angle, y = top$share * 0.45, label = scales::percent(top$share, accuracy = 1),
+                      size = 2.8, colour = pal$paper, family = pal$text_family) +
     ggplot2::labs(x = NULL, y = NULL, title = "Fire-weather winds come from") +
     theme_vegrisk(9) +
-    ggplot2::theme(plot.title = ggplot2::element_text(size = 9), panel.grid.major.y = ggplot2::element_blank())
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 9, hjust = 0.5), aspect.ratio = 1,
+                   panel.grid.major.y = ggplot2::element_blank(), plot.margin = ggplot2::margin(4, 4, 4, 4))
 
-  ge <- intToUtf8(8805)  # >=
-  le <- intToUtf8(8804)  # <=
-  pm <- intToUtf8(177)   # +/-
-  deg <- intToUtf8(176)
   sub <- sprintf(paste("%d hours with gusts %s %.0f m/s and RH %s %g%% (ERA5 reanalysis via Open-Meteo).",
                        "\nStrike trees under the %s conductor bound, over canopy height (darker = taller).",
-                       "An hour counts against a tree when its wind",
-                       "\nblows the tree within the arc of fall directions that reach a conductor (%s%g%s fall scatter)."),
-                 info$n_hours, ge, info$min_gust_ms, le, info$max_rh,
-                 if (bound == "lo") "pessimistic (code-minimum)" else "optimistic", pm, info$spread_deg, deg)
-  out <- patchwork::wrap_plots(p, r, widths = c(3, 1)) +
+                       "\nAn hour counts against a tree when its wind blows the tree within the arc of fall directions",
+                       "that reach a conductor (%s%g%s fall scatter)."),
+                 info$n_hours, sym$ge, info$min_gust_ms, sym$le, info$max_rh,
+                 if (bound == "lo") "pessimistic (code-minimum)" else "optimistic", sym$pm, info$spread_deg, sym$deg)
+  # The rose takes the top of a narrow right column; the map keeps the rest.
+  # free(): the rose is not aligned with the map's legend rows, so it fills
+  # its cell instead of inheriting the legend's height as a gap.
+  out <- patchwork::wrap_plots(A = p, B = patchwork::free(r), design = "AB\nA#",
+                               widths = c(3, 1), heights = c(1, 2.2)) +
     patchwork::plot_annotation(title = title, subtitle = sub, theme = theme_vegrisk())
   save_or_return(out, file, 10, 8)
 }
