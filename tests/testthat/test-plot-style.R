@@ -1,5 +1,7 @@
-test_that("classic is the default style and unknown styles are rejected", {
+test_that("midmod is the default style, classic is opt-in, unknown styles are rejected", {
   withr::local_options(vegrisk.style = NULL)
+  expect_identical(vegrisk_style(), "midmod")
+  withr::local_options(vegrisk.style = "classic")
   expect_identical(vegrisk_style(), "classic")
   withr::local_options(vegrisk.style = "art-deco")
   expect_error(vegrisk_style(), "classic")

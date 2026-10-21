@@ -11,7 +11,8 @@ plot_cross_section(
   file = NULL,
   at = 0.5,
   width_m = 4,
-  half_len_m = 40
+  half_len_m = 40,
+  line_id = NULL
 )
 }
 \arguments{
@@ -28,6 +29,9 @@ plot_cross_section(
 \item{width_m}{Slab thickness (metres, along the line).}
 
 \item{half_len_m}{Section half-length (metres, across the line).}
+
+\item{line_id}{Which merged line of a multi-line corridor to cut; the
+first by default, with a message when others exist.}
 }
 \description{
 Cross-section of classified points perpendicular to the line

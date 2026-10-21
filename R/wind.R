@@ -208,7 +208,7 @@ fall_geometry <- function(trees, profile, m, phase_offset_m, growth_m) {
     # reach^2 = d^2 + dz^2, so the horizontal reach at conductor height is
     # R^2 = h^2 - dz^2 = h^2 - reach^2 + d^2.
     r2 <- h^2 - reach^2 + d^2
-    ifelse(is.finite(reach) & h >= reach & r2 > 0, acos(pmin(d / sqrt(r2), 1)) * 180 / pi, NA_real_)
+    ifelse(is.finite(reach) & h >= reach & r2 > 0, acos(pmin(d / sqrt(pmax(r2, 0)), 1)) * 180 / pi, NA_real_)
   }
   trees$arc_lo_deg <- arc(trees$reach_lo_m)
   trees$arc_hi_deg <- arc(trees$reach_hi_m)

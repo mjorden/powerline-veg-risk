@@ -4,7 +4,7 @@
 \alias{plot_profile}
 \title{Ground and conductor profile along the line}
 \usage{
-plot_profile(profile, risk = NULL, attach_m = NA, file = NULL)
+plot_profile(profile, risk = NULL, attach_m = NA, line_id = NULL, file = NULL)
 }
 \arguments{
 \item{profile}{Output of \code{\link[=conductor_profile]{conductor_profile()}}.}
@@ -15,8 +15,17 @@ their base elevation.}
 \item{attach_m}{Attachment height used for the upper bound (for the
 subtitle).}
 
+\item{line_id}{Which line of a multi-line corridor to draw; the first by
+default, with a message when others exist.}
+
 \item{file}{Output PNG path, or \code{NULL}.}
 }
 \description{
-Ground and conductor profile along the line
+Where the conductor was classified from returns it is drawn as a line
+(the per-5 m-bin elevation, interpolated across gaps of at most
+\code{max_gap_m}); elsewhere the band between the code-minimum floor and the
+chord between supports brackets it. The two never join: a switch between
+measured and bounded is a break in the drawing, not a vertical in the
+conductor. Strike trees, when \code{risk} is given, sit at their base
+elevation along the line.
 }
