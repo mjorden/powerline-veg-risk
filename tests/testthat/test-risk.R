@@ -337,3 +337,29 @@ test_that("'no data' under both bounds gets 'low coverage' and is drawn apart on
   built <- suppressWarnings(ggplot2::ggplot_build(p))
   expect_true("insufficient LiDAR coverage" %in% built$plot$layers[[3]]$data$certain)
 })
+
+test_that("the midmod risk map dots 'no data' segments and ignores voids off the corridor", {
+  skip_if_not_installed("ggplot2")
+  withr::local_options(vegrisk.style = "midmod")
+  r <- make_rasters(data.frame(x = x0 + 150.5, y = y0 + 5.5, h = 6))
+  xy <- terra::crds(r$dtm, na.rm = FALSE)
+  # a void under segment 1, plus off-corridor "voids" in the outer rows
+  outside <- abs(xy[, 2] - y0) > 40 # beyond the corridor clip: no returns
+  r$void <- terra::setValues(r$dtm, outside)
+  r$unobserved <- terra::setValues(r$dtm, (xy[, 1] < x0 + 70 & abs(xy[, 2] - y0) < 10) | outside)
+  rk <- risk_for(r, tree_ws_m = 3)
+  built <- suppressWarnings(ggplot2::ggplot_build(plot_risk_map(r, rk)))
+  sub <- built$plot$labels$subtitle
+  expect_match(sub, "Dotted segments")
+  # only the in-corridor void is counted: 70 x 20 cells, not the outer rows
+  expect_match(sub, "1,400 m² unobserved")
+  expect_no_match(sub, "on any segment")
+  # the no-data segment is its own dotted layer, off the encroachment ramp
+  i <- which(vapply(built$plot$layers, function(l) {
+    d <- l$data
+    !is.null(l$mapping$linetype) && is.data.frame(d) && nrow(d) > 0 &&
+      all(d$certain == "insufficient LiDAR coverage")
+  }, logical(1)))
+  expect_length(i, 1)
+  expect_true(all(built$data[[i]]$linetype == "11"))
+})

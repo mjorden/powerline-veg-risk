@@ -81,7 +81,7 @@ OSM lines (Overpass) ─┘                │
 - **wire:** an air-gap test (an elevated layer with empty space beneath it across a 3×3 m window) plus an **along-line run test** in chainage/offset coordinates: each conductor row must extend ≥ 12 m along *any* mapped line in the area, so second circuits on a shared right-of-way are labelled too. Crown tops are compact and fail.
 - **vegetation:** everything else.
 
-Elevated near-line candidates that fail the wire test **abstain** (NA) rather than becoming "vegetation", so missed conductors aren't taught as trees.
+Elevated suspended candidates that fail the wire test, or that lie beyond `wire_search_m` of any mapped line, **abstain** (NA) rather than becoming "vegetation", so missed and unmapped conductors aren't taught as trees. The mapped lines include OSM `power=minor_line` (distribution) as well as `power=line`.
 
 **Validation is spatial, and the gap is reported.** Folds are 100 m spatial blocks; random folds are reported alongside. Precision is measured at real class prevalence, and the headline metric is average precision against its no-skill value. An ablation drops the features that encode the labelling rule (height, echo structure).
 
@@ -230,6 +230,7 @@ Wires transfer across space here: average precision 0.88 against a no-skill 0.10
 - **Wire labels are trusted.** A wire label requires an observed air gap beneath it, so cells holding only wire-labelled returns count as observed bare ground. A thin branch layer within the label's 4 m layer under a conductor can join the wire label and drop out of the canopy model.
 - **Conductor removal is a judgement.** Canopy within ~1.5 m beneath a conductor can't be told apart from a conductor over dense canopy; both are kept as canopy and flagged as grow-in, which is the conservative choice.
 - **Second circuits** are labelled and their towers masked, but only the study line gets a conductor profile; second-circuit returns over canopy can remain in the canopy model beyond the study line's envelope.
+- **Conductors OSM doesn't map** (telecom and communication lines, unmapped circuits) are not labelled wire. Where they hang free they abstain and stay out of the canopy model; where they cross canopy they look like foliage and are kept as canopy, like any conductor over a crown.
 - **OSM geometry** is volunteer-digitised. Conductor envelopes are sized from where returns actually are, not from the centreline alone.
 - **The structure mask** hides canopy close to each support, so strike trees right beside structures are not scored.
 - **Treetops from a CHM** (local maxima, 5 m window) merge or split crowns in dense stands.

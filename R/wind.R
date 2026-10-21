@@ -76,6 +76,10 @@ fire_wind_hours <- function(wind, gust_quantile = 0.95, min_gust_ms = NULL, max_
   if (is.null(min_gust_ms)) {
     min_gust_ms <- stats::quantile(wind$gust_ms, gust_quantile, na.rm = TRUE, names = FALSE)
   }
+  if (length(min_gust_ms) != 1 || !is.finite(min_gust_ms)) {
+    rlang::abort(paste("The gust threshold is undefined: `min_gust_ms` is not a finite number",
+                       "(an all-NA `gust_ms` record gives an NA quantile)."))
+  }
   sel <- !is.na(wind$gust_ms) & !is.na(wind$dir_from_deg) & wind$gust_ms >= min_gust_ms &
     (is.infinite(max_rh) | (!is.na(wind$rh_pct) & wind$rh_pct <= max_rh))
   out <- wind[sel, ]
@@ -111,23 +115,34 @@ fire_wind_hours <- function(wind, gust_quantile = 0.95, min_gust_ms = NULL, max_
 #'   deviate from the wind direction.
 #' @param windward_min Share of fire-weather hours at or above which a strike
 #'   tree counts as *windward* of the line.
+#' @param min_hours Fewer fire-weather hours than this gives a warning: the
+#'   hit shares then rest on a handful of hours. With none at all, every
+#'   wind column is `NA`, not zero.
 #' @return `risk` with added tree columns `bearing_deg` (grid bearing from
 #'   the tree to the line), `arc_lo_deg`, `arc_hi_deg` (half-width of the
 #'   hitting arc under each conductor bound; `NA` when it cannot reach),
 #'   `wind_hit_lo`, `wind_hit_hi` (share of fire-weather hours that would
 #'   throw it into the line), and segment columns `wind_strike_lo`,
 #'   `wind_strike_hi` (sum of `wind_hit_*` over strike trees: the expected
-#'   number thrown towards the line in a fire-weather hour) and
-#'   `n_strike_windward_lo`, `n_strike_windward_hi`. The fire-wind summary is
-#'   stored in `attr(risk$segments, "wind")`.
+#'   number thrown towards the line in a fire-weather hour),
+#'   `n_strike_windward_lo`, `n_strike_windward_hi` and
+#'   `n_fire_weather_hours` (so the hour count survives `st_write()`). The
+#'   fire-wind summary is stored in `attr(risk$segments, "wind")`.
 #' @export
 wind_fall_exposure <- function(risk, profile, wind_hours, phase_offset_m = 3, growth_m = 0,
-                               spread_deg = 15, windward_min = 0.5) {
+                               spread_deg = 15, windward_min = 0.5, min_hours = 24) {
   trees <- risk$trees
   crs <- sf::st_crs(trees)
   m <- crs_m_per_unit(crs)
   conv <- grid_convergence(sf::st_as_sfc(sf::st_bbox(risk$segments)))
   wind_to <- (wind_hours$dir_from_deg + 180 + conv) %% 360
+  n_hours <- nrow(wind_hours)
+  if (n_hours == 0) {
+    rlang::warn("No fire-weather hours: every wind exposure column is NA.")
+  } else if (n_hours < min_hours) {
+    rlang::warn(sprintf("Only %d fire-weather hours (min_hours = %d): hit shares rest on very few hours.",
+                        n_hours, min_hours))
+  }
 
   trees <- fall_geometry(trees, profile, m, phase_offset_m, growth_m)
   hit <- function(arc) {
@@ -141,19 +156,24 @@ wind_fall_exposure <- function(risk, profile, wind_hours, phase_offset_m = 3, gr
   trees$wind_hit_hi <- hit(trees$arc_hi_deg)
 
   seg <- risk$segments
+  # With no hours the hit shares are NA, and so are the segment sums: zero
+  # would read as "no windward trees".
   per_seg <- function(col, strike) vapply(seg$seg_id, function(s) {
+    if (n_hours == 0) return(NA_real_)
     sel <- trees$seg_id == s & trees[[strike]]
     sum(trees[[col]][sel], na.rm = TRUE)
   }, 0)
   count_seg <- function(col, strike) vapply(seg$seg_id, function(s) {
+    if (n_hours == 0) return(NA_integer_)
     sum(trees$seg_id == s & trees[[strike]] & trees[[col]] >= windward_min, na.rm = TRUE)
   }, 0L)
   seg$wind_strike_lo <- per_seg("wind_hit_lo", "strike_lo")
   seg$wind_strike_hi <- per_seg("wind_hit_hi", "strike_hi")
   seg$n_strike_windward_lo <- count_seg("wind_hit_lo", "strike_lo")
   seg$n_strike_windward_hi <- count_seg("wind_hit_hi", "strike_hi")
+  seg$n_fire_weather_hours <- n_hours
 
-  attr(seg, "wind") <- list(n_hours = nrow(wind_hours), n_record = attr(wind_hours, "n_record"),
+  attr(seg, "wind") <- list(n_hours = n_hours, n_record = attr(wind_hours, "n_record"),
                             min_gust_ms = attr(wind_hours, "min_gust_ms"),
                             max_rh = attr(wind_hours, "max_rh"),
                             dir_from_deg = wind_hours$dir_from_deg,
@@ -316,19 +336,38 @@ iso_hours <- function(x) {
 #' @param spread_deg Fall-direction allowance, as in [wind_fall_exposure()].
 #' @param bound `"lo"` or `"hi"`: which conductor bound defines the strike
 #'   trees and their arcs.
+#' @param now Forecast hours before the start of this hour are already past
+#'   and are dropped: NWS gridpoint layers begin at the start of the current
+#'   period, hours before the request. Set it in tests to pin the clock.
 #' @return A tibble, one row per segment with any flagged exposure, ordered
 #'   by trees exposed: `seg_id`, `first_hour`, `n_hours`, `max_gust_ms`,
-#'   `min_rh_pct`, `n_trees_exposed`, `red_flag`, `dry_grow_in`. Attribute
-#'   `hours` holds the flagged forecast hours.
+#'   `min_rh_pct` (`NA` when the flagged hours carry no value, e.g. a Red
+#'   Flag Warning over hours with no gust), `n_trees_exposed`, `red_flag`,
+#'   `dry_grow_in`. Attribute `hours` holds the flagged forecast hours and
+#'   attribute `settings` the thresholds, bound, clock and the number of past
+#'   hours dropped, so a writer can record what the list was made with.
 #' @export
 forecast_watchlist <- function(risk, forecast, alerts = NULL, min_gust_ms = NULL, max_rh = NULL,
-                               spread_deg = NULL, bound = c("lo", "hi")) {
+                               spread_deg = NULL, bound = c("lo", "hi"), now = Sys.time()) {
   bound <- match.arg(bound)
   info <- attr(risk$segments, "wind")
   min_gust_ms <- min_gust_ms %||% info$min_gust_ms
   max_rh <- max_rh %||% info$max_rh %||% 30
   spread_deg <- spread_deg %||% info$spread_deg %||% 15
-  if (is.null(min_gust_ms)) rlang::abort("Supply `min_gust_ms` (no climatology in `risk`).")
+  finite_scalar <- function(x) length(x) == 1 && is.numeric(x) && is.finite(x)
+  if (!finite_scalar(min_gust_ms)) {
+    rlang::abort("`min_gust_ms` must be a finite number (none in `risk`'s wind climatology either).")
+  }
+  if (!(length(max_rh) == 1 && is.numeric(max_rh) && !is.na(max_rh))) {
+    rlang::abort("`max_rh` must be a number (or Inf to keep every humidity).")
+  }
+  if (!finite_scalar(spread_deg)) rlang::abort("`spread_deg` must be a finite number.")
+  if (!all(c("bearing_deg", paste0("arc_", bound, "_deg")) %in% names(risk$trees))) {
+    rlang::abort("`risk$trees` has no hitting arcs: run `wind_fall_exposure()` first.")
+  }
+
+  past <- !is.na(forecast$time) & forecast$time < trunc(now, "hours")
+  forecast <- forecast[!past, ]
 
   rf <- alerts[alerts$event %in% "Red Flag Warning", , drop = FALSE]
   in_rf <- vapply(forecast$time, function(t) {
@@ -339,10 +378,14 @@ forecast_watchlist <- function(risk, forecast, alerts = NULL, min_gust_ms = NULL
   hours <- forecast[(windy | in_rf) & !is.na(forecast$dir_from_deg), ]
   hours$red_flag <- in_rf[(windy | in_rf) & !is.na(forecast$dir_from_deg)]
 
+  settings <- list(min_gust_ms = min_gust_ms, max_rh = max_rh, spread_deg = spread_deg,
+                   bound = bound, now = now, n_past_hours_dropped = sum(past),
+                   n_forecast_hours = nrow(forecast))
   empty <- tibble::tibble(seg_id = integer(), first_hour = as.POSIXct(character(), tz = "UTC"),
                           n_hours = integer(), max_gust_ms = numeric(), min_rh_pct = numeric(),
                           n_trees_exposed = integer(), red_flag = logical(), dry_grow_in = logical())
   attr(empty, "hours") <- hours
+  attr(empty, "settings") <- settings
   if (nrow(hours) == 0) return(empty)
 
   trees <- risk$trees
@@ -367,8 +410,8 @@ forecast_watchlist <- function(risk, forecast, alerts = NULL, min_gust_ms = NULL
     if (!any(hit_h) && !dry_i) return(NULL)
     hh <- if (any(hit_h)) hit_h else rep(TRUE, nrow(hours)) # dry canopy: every flagged hour
     tibble::tibble(seg_id = s, first_hour = min(hours$time[hh]), n_hours = sum(hh),
-                   max_gust_ms = max(hours$gust_ms[hh], na.rm = TRUE),
-                   min_rh_pct = suppressWarnings(min(hours$rh_pct[hh], na.rm = TRUE)),
+                   max_gust_ms = finite_max(hours$gust_ms[hh]),
+                   min_rh_pct = finite_min(hours$rh_pct[hh]),
                    n_trees_exposed = if (any(ti)) sum(rowSums(exposed[ti, , drop = FALSE]) > 0) else 0L,
                    red_flag = any(hours$red_flag[hh]), dry_grow_in = dry_i)
   })
@@ -376,5 +419,11 @@ forecast_watchlist <- function(risk, forecast, alerts = NULL, min_gust_ms = NULL
   if (is.null(out)) return(empty)
   out <- out[order(-out$n_trees_exposed, -out$dry_grow_in, out$first_hour), ]
   attr(out, "hours") <- hours
+  attr(out, "settings") <- settings
   out
 }
+
+# max()/min() that give NA, not +/-Inf and a warning, when nothing is finite
+# (a Red Flag Warning can flag hours whose gust or humidity is missing).
+finite_max <- function(x) { x <- x[is.finite(x)]; if (length(x)) max(x) else NA_real_ }
+finite_min <- function(x) { x <- x[is.finite(x)]; if (length(x)) min(x) else NA_real_ }

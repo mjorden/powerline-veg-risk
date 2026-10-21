@@ -7,6 +7,7 @@
 osm_power_lines(
   aoi = NULL,
   ids = NULL,
+  power = c("line", "minor_line"),
   overpass_url = "https://overpass-api.de/api/interpreter"
 )
 }
@@ -15,11 +16,17 @@ osm_power_lines(
 
 \item{ids}{Optional OSM way ids; if given, only these ways are returned.}
 
+\item{power}{OSM \verb{power=*} values to fetch within \code{aoi}. The default takes
+transmission (\code{line}) and distribution (\code{minor_line}) ways: both carry
+suspended conductors, and a distribution wire crossing the corridor
+would otherwise be taught to the classifier as vegetation. Underground
+\code{cable} is deliberately left out. Ignored when \code{ids} is given.}
+
 \item{overpass_url}{Overpass endpoint.}
 }
 \value{
 An \code{sf} LINESTRING data frame (EPSG:4326) with \code{osm_id}, \code{name},
-\code{voltage_kv}, \code{operator}.
+\code{power}, \code{voltage_kv}, \code{operator}.
 }
 \description{
 Fetch overhead power lines from OpenStreetMap

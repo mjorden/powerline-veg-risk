@@ -40,6 +40,7 @@ Suggests:
     ggplot2,
     patchwork,
     scales,
+    systemfonts,
     testthat (>= 3.0.0)
 URL: https://mjorden.github.io/powerline-veg-risk/, https://github.com/mjorden/powerline-veg-risk
 BugReports: https://github.com/mjorden/powerline-veg-risk/issues

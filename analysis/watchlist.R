@@ -5,7 +5,10 @@
 # Needs output/<site>/ from a run whose config set `wind` (and optionally
 # `landsat`). Pulls the live NWS hourly forecast and active alerts for the
 # corridor and applies the climatological fire-weather thresholds; nothing
-# is reprocessed. Writes output/<site>/watchlist.csv.
+# is reprocessed. Writes output/<site>/watchlist.csv (the latest list, with
+# the settings it was made with in every row) and a timestamped copy
+# watchlist_<UTC time>.csv, so earlier lists are kept. A list with nothing
+# flagged is one row saying so, not an empty file.
 
 devtools::load_all(quiet = TRUE)
 suppressPackageStartupMessages(library(sf))
@@ -32,12 +35,35 @@ message(sprintf("Fire-weather thresholds (from the %d-hour record): gust >= %.1f
 message(sprintf("Forecast peak gust %.1f m/s; minimum RH %.0f%%",
                 max(fc$gust_ms, na.rm = TRUE), min(fc$rh_pct, na.rm = TRUE)))
 
-wl <- forecast_watchlist(risk, fc, alerts, bound = "lo")
+now <- Sys.time()
+bound <- "lo"  # pessimistic (code-minimum) conductor, as in the wind-exposure map
+wl <- forecast_watchlist(risk, fc, alerts, bound = bound, now = now)
 hours <- attr(wl, "hours")
+st <- attr(wl, "settings")
 if (nrow(hours) == 0) {
   message("No forecast hour meets the fire-weather criteria and no Red Flag Warning is active.")
 } else {
   message(sprintf("%d flagged hour(s); %d segment(s) to watch:", nrow(hours), nrow(wl)))
   print(as.data.frame(wl))
 }
-data.table::fwrite(wl, file.path(out, "watchlist.csv"))
+
+# What this list was made with, in every row, so the CSV stands on its own.
+meta <- data.frame(
+  generated_at = format(now, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  nws_office = attr(fc, "office"), nws_grid = attr(fc, "grid"),
+  forecast_from = format(min(fc$time), "%Y-%m-%dT%H:%MZ", tz = "UTC"),
+  forecast_to = format(max(fc$time), "%Y-%m-%dT%H:%MZ", tz = "UTC"),
+  past_hours_dropped = st$n_past_hours_dropped,
+  min_gust_ms = st$min_gust_ms, max_rh_pct = st$max_rh, spread_deg = st$spread_deg,
+  bound = bound, n_flagged_hours = nrow(hours),
+  active_alerts = if (nrow(alerts)) paste(unique(alerts$event), collapse = "; ") else "",
+  stringsAsFactors = FALSE)
+rows <- if (nrow(wl) > 0) as.data.frame(wl) else {
+  data.frame(seg_id = NA_integer_, first_hour = as.POSIXct(NA, tz = "UTC"), n_hours = 0L,
+             max_gust_ms = NA_real_, min_rh_pct = NA_real_, n_trees_exposed = 0L,
+             red_flag = FALSE, dry_grow_in = NA)
+}
+rows$note <- if (nrow(wl) > 0) "" else "no segments flagged"
+out_rows <- cbind(rows, meta[rep(1, nrow(rows)), , drop = FALSE])
+data.table::fwrite(out_rows, file.path(out, "watchlist.csv"))
+data.table::fwrite(out_rows, file.path(out, sprintf("watchlist_%s.csv", format(now, "%Y%m%dT%H%MZ", tz = "UTC"))))

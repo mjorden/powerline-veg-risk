@@ -38,7 +38,7 @@ winds <- function(dir_from, gust = 20, rh = 15) {
 
 test_that("the hitting arc follows from the 3D reach", {
   sc <- two_trees()
-  rk <- wind_fall_exposure(sc$risk, sc$profile, winds(0))
+  rk <- wind_fall_exposure(sc$risk, sc$profile, winds(0), min_hours = 1)
   tt <- rk$trees[order(rk$trees$seg_id), ]
   # d = 13.5 - 3 = 10.5, dz = 10, h = 15: R^2 = 225 - 100 = 125
   expect_equal(tt$arc_lo_deg, rep(acos(10.5 / sqrt(125)) * 180 / pi, 2), tolerance = 0.5)
@@ -47,7 +47,7 @@ test_that("the hitting arc follows from the 3D reach", {
 
 test_that("a north wind throws the north tree into the line, not the south one", {
   sc <- two_trees()
-  rk <- wind_fall_exposure(sc$risk, sc$profile, winds(rep(0, 10)))
+  rk <- wind_fall_exposure(sc$risk, sc$profile, winds(rep(0, 10)), min_hours = 1)
   tt <- rk$trees[order(rk$trees$seg_id), ]
   expect_equal(tt$wind_hit_lo, c(1, 0))
   s <- sf::st_drop_geometry(rk$segments)
@@ -60,13 +60,13 @@ test_that("a north wind throws the north tree into the line, not the south one",
 test_that("an oblique wind hits only within the arc plus spread", {
   sc <- two_trees()
   # Wind towards 240 (from 60): 60 degrees off the north tree's bearing of 180.
-  narrow <- wind_fall_exposure(sc$risk, sc$profile, winds(60), spread_deg = 15)
-  wide <- wind_fall_exposure(sc$risk, sc$profile, winds(60), spread_deg = 45)
+  narrow <- wind_fall_exposure(sc$risk, sc$profile, winds(60), spread_deg = 15, min_hours = 1)
+  wide <- wind_fall_exposure(sc$risk, sc$profile, winds(60), spread_deg = 45, min_hours = 1)
   north <- function(rk) rk$trees$wind_hit_lo[rk$trees$seg_id == 1]
   expect_equal(north(narrow), 0)
   expect_equal(north(wide), 1)
   # Half the hours from the north, half from the south: each tree hit half the time.
-  mixed <- wind_fall_exposure(sc$risk, sc$profile, winds(c(0, 180)))
+  mixed <- wind_fall_exposure(sc$risk, sc$profile, winds(c(0, 180)), min_hours = 1)
   expect_equal(mixed$trees$wind_hit_lo, c(0.5, 0.5))
 })
 
@@ -127,14 +127,16 @@ test_that("the watchlist flags segments whose strike trees the forecast wind wou
   sc <- two_trees()
   rk <- wind_fall_exposure(sc$risk, sc$profile, fire_wind_hours(
     tibble::tibble(time = Sys.time(), wind_ms = 5, gust_ms = 20, dir_from_deg = 0, rh_pct = 10),
-    min_gust_ms = 15, max_rh = 30))
+    min_gust_ms = 15, max_rh = 30), min_hours = 1)
   t0 <- as.POSIXct("2026-10-20 06:00", tz = "UTC")
   fc <- tibble::tibble(time = t0 + 3600 * 0:3, wind_ms = 8,
                        gust_ms = c(10, 22, 25, 22), dir_from_deg = c(0, 0, 0, 180), rh_pct = c(10, 12, 50, 12))
-  wl <- forecast_watchlist(rk, fc)
+  wl <- forecast_watchlist(rk, fc, now = t0)
   # Hour 1 too calm, hour 3 too humid; hour 2 (north wind) hits segment 1,
   # hour 4 (south wind) hits segment 2.
   expect_equal(nrow(attr(wl, "hours")), 2)
+  expect_equal(attr(wl, "settings")$bound, "lo")
+  expect_equal(attr(wl, "settings")$n_past_hours_dropped, 0)
   expect_setequal(wl$seg_id, c(1, 2))
   expect_equal(wl$first_hour[wl$seg_id == 1], t0 + 3600)
   expect_equal(wl$first_hour[wl$seg_id == 2], t0 + 3 * 3600)
@@ -144,10 +146,76 @@ test_that("the watchlist flags segments whose strike trees the forecast wind wou
   # A Red Flag Warning flags the humid hour too.
   rf <- tibble::tibble(event = "Red Flag Warning", onset = t0 + 2 * 3600, ends = t0 + 2 * 3600,
                        headline = "")
-  wl2 <- forecast_watchlist(rk, fc, alerts = rf)
+  wl2 <- forecast_watchlist(rk, fc, alerts = rf, now = t0)
   expect_equal(nrow(attr(wl2, "hours")), 3)
   expect_true(wl2$red_flag[wl2$seg_id == 1])
 
-  calm <- forecast_watchlist(rk, transform(fc, gust_ms = 1))
+  calm <- forecast_watchlist(rk, transform(fc, gust_ms = 1), now = t0)
   expect_equal(nrow(calm), 0)
+  expect_equal(attr(calm, "settings")$min_gust_ms, 15)
+})
+
+watchlist_fixture <- function() {
+  sc <- two_trees()
+  rk <- wind_fall_exposure(sc$risk, sc$profile, fire_wind_hours(
+    tibble::tibble(time = Sys.time(), wind_ms = 5, gust_ms = 20, dir_from_deg = 0, rh_pct = 10),
+    min_gust_ms = 15, max_rh = 30), min_hours = 1)
+  t0 <- as.POSIXct("2026-10-20 06:00", tz = "UTC")
+  fc <- tibble::tibble(time = t0 + 3600 * 0:3, wind_ms = 8,
+                       gust_ms = c(10, 22, 25, 22), dir_from_deg = c(0, 0, 0, 180), rh_pct = c(10, 12, 50, 12))
+  list(rk = rk, t0 = t0, fc = fc)
+}
+
+test_that("forecast hours already past are not flagged as coming weather (#29)", {
+  f <- watchlist_fixture()
+  # 08:30: hours 06:00 and 07:00 are gone; 08:00 (humid) and 09:00 (south wind) remain.
+  wl <- forecast_watchlist(f$rk, f$fc, now = f$t0 + 2.5 * 3600)
+  expect_equal(attr(wl, "settings")$n_past_hours_dropped, 2)
+  expect_equal(wl$seg_id, 2)
+  expect_equal(wl$first_hour, f$t0 + 3 * 3600)
+  # The hour in progress is kept.
+  wl_now <- forecast_watchlist(f$rk, f$fc, now = f$t0 + 3600 + 1800)
+  expect_setequal(wl_now$seg_id, c(1, 2))
+})
+
+test_that("red-flag hours with no gust or humidity give NA, not +/-Inf (#29)", {
+  f <- watchlist_fixture()
+  fc <- f$fc
+  fc$gust_ms <- NA_real_
+  fc$rh_pct <- NA_real_
+  rf <- tibble::tibble(event = "Red Flag Warning", onset = f$t0, ends = f$t0 + 4 * 3600, headline = "")
+  expect_silent(wl <- forecast_watchlist(f$rk, fc, alerts = rf, now = f$t0))
+  expect_equal(nrow(attr(wl, "hours")), 4)
+  expect_true(all(is.na(wl$max_gust_ms)))
+  expect_true(all(is.na(wl$min_rh_pct)))
+  expect_true(all(wl$red_flag))
+})
+
+test_that("an undefined gust threshold is refused, not propagated (#29, #14)", {
+  all_na <- tibble::tibble(time = as.POSIXct("2020-01-01", tz = "UTC") + 3600 * 0:9,
+                           wind_ms = 1, gust_ms = NA_real_, dir_from_deg = 270, rh_pct = 10)
+  expect_error(fire_wind_hours(all_na), "undefined")
+  f <- watchlist_fixture()
+  expect_error(forecast_watchlist(f$rk, f$fc, min_gust_ms = NA_real_, now = f$t0), "min_gust_ms")
+  expect_error(forecast_watchlist(f$rk, f$fc, max_rh = NA, now = f$t0), "max_rh")
+  # A risk object without hitting arcs is caught before the vapply.
+  sc <- two_trees()
+  expect_error(forecast_watchlist(sc$risk, f$fc, min_gust_ms = 15, now = f$t0), "wind_fall_exposure")
+})
+
+test_that("no fire-weather hours gives NA exposure, not zero, and the count survives (#14)", {
+  sc <- two_trees()
+  none <- fire_wind_hours(tibble::tibble(time = Sys.time(), wind_ms = 1, gust_ms = 2,
+                                         dir_from_deg = 0, rh_pct = 90), min_gust_ms = 15, max_rh = 30)
+  expect_equal(nrow(none), 0)
+  expect_warning(rk <- wind_fall_exposure(sc$risk, sc$profile, none), "No fire-weather hours")
+  s <- sf::st_drop_geometry(rk$segments)
+  expect_true(all(is.na(s$wind_strike_lo)))
+  expect_true(all(is.na(s$n_strike_windward_hi)))
+  expect_equal(s$n_fire_weather_hours, c(0L, 0L))
+  expect_true(all(is.na(rk$trees$wind_hit_lo)))
+  few <- fire_wind_hours(tibble::tibble(time = Sys.time() + 3600 * 1:5, wind_ms = 5, gust_ms = 20,
+                                        dir_from_deg = 0, rh_pct = 10), min_gust_ms = 15, max_rh = 30)
+  expect_warning(rk2 <- wind_fall_exposure(sc$risk, sc$profile, few, min_hours = 24), "Only 5")
+  expect_equal(unique(sf::st_drop_geometry(rk2$segments)$n_fire_weather_hours), 5L)
 })

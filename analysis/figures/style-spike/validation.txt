@@ -1,0 +1,81 @@
+## categorical (point classes), all pairs
+
+Palette (light, surface #F4EEDE, categorical): 6 slots
+  [FAIL] Lightness band         outside band: [["#6E3318",0.395],["#E1CFB3",0.862]]
+  [FAIL] Chroma floor           below floor (reads gray): [["#6E3318",0.093],["#E1CFB3",0.043],["#AFA497",0.022]]
+  [PASS] CVD separation         worst all-pairs #AFA497↔#1F95B2 ΔE 9.6 (protan) · tritan 12.0
+  [FAIL] Normal-vision floor    worst all-pairs #AFA497↔#AE7F1E ΔE 13.8 (normal) — below 15, hard to tell apart even with full color vision
+  [WARN] Contrast vs surface    below 3:1 — relief required (visible labels or table view): [["#E1CFB3",1.32],["#AFA497",2.11]]
+
+  → FAILED — fix the marked checks  (CVD in the 6–8 floor band is legal ONLY with secondary encoding: direct labels, gaps, or texture)
+  scope: categorical palettes only. For a lone status/text color check WCAG text contrast; for a sequential ramp, lightness monotonicity.
+
+slot      hex      L     C    contrast
+vegetation #606A04 0.50 0.112 5.09
+wire      #1F95B2 0.62 0.106 3.02
+structure #6E3318 0.39 0.093 8.43
+building  #AE7F1E 0.63 0.120 3.10
+low       #E1CFB3 0.86 0.043 1.32
+ground    #AFA497 0.72 0.022 2.11
+pair                 normal protan deutan tritan
+vegetation-wire        21.1   22.2   20.4   17.6
+vegetation-structure   16.0   15.4   10.5   15.0
+vegetation-building    14.8    9.9   13.5   16.0
+vegetation-low         37.3   35.7   36.6   36.5
+vegetation-ground      24.6   23.3   23.5   22.6
+wire-structure         30.1   32.3   25.5   32.4
+wire-building          21.2   18.6   19.6   20.5
+wire-low               27.9   21.7   27.8   27.1
+wire-ground            16.2    9.6   14.9   15.9
+structure-building     24.3   25.3   23.9   23.4
+structure-low          47.1   49.9   46.4   47.2
+structure-ground       33.7   36.6   32.7   34.0
+building-low           24.7   26.7   24.2   24.0
+building-ground        13.8   15.8   13.3   12.0
+low-ground             13.9   13.5   14.1   13.9
+## encroachment ramp #CB8D33,#C0722E,#B4552A,#8F3F1D,#6B2A12
+
+Palette (light, surface #F4EEDE, ordinal ramp): 5 slots
+  [PASS] Lightness monotone     steps read light→dark
+  [PASS] Adjacent ΔL            all gaps >= 0.06
+  [PASS] Light-end contrast     #CB8D33 at 2.45:1 vs surface
+  [PASS] Single hue             hue spread 33°
+
+  → ALL CHECKS PASS  (ordinal: one hue, monotone L, visible step gaps, light end clears surface)
+## canopy ramp #ACA972,#96995E,#818A4A,#636C33,#46511E
+
+Palette (light, surface #F4EEDE, ordinal ramp): 5 slots
+  [PASS] Lightness monotone     steps read light→dark
+  [FAIL] Adjacent ΔL            steps too close: [["#ACA972","#96995E",0.058],["#96995E","#818A4A",0.055]]
+  [PASS] Light-end contrast     #ACA972 at 2.09:1 vs surface
+  [PASS] Single hue             hue spread 15°
+
+  → FAILED — fix the marked checks  (ordinal: one hue, monotone L, visible step gaps, light end clears surface)
+## neutrals / text
+slot      hex      L     C    contrast
+ink       #3B2A1E 0.30 0.033 11.80
+ink2      #6B5744 0.47 0.039 5.90
+muted     #8C7B68 0.59 0.035 3.52
+rule      #E3D9C4 0.89 0.030 1.21
+nodata    #8E8578 0.62 0.022 3.14
+unobs     #CFC8BB 0.83 0.019 1.44
+## cv schemes (adjacent)
+
+Palette (light, surface #F4EEDE, categorical): 3 slots
+  [PASS] Lightness band         all 3 inside L 0.43–0.77
+  [FAIL] Chroma floor           below floor (reads gray): [["#8C7B68",0.035]]
+  [WARN] CVD separation         worst all-pairs #B5562A↔#8C7B68 ΔE 7.1 (deutan) · tritan 13.6
+  [FAIL] Normal-vision floor    worst all-pairs #B5562A↔#8C7B68 ΔE 11.0 (normal) — below 15, hard to tell apart even with full color vision
+  [PASS] Contrast vs surface    all 3 >= 3:1
+
+  → FAILED — fix the marked checks  (CVD in the 6–8 floor band is legal ONLY with secondary encoding: direct labels, gaps, or texture)
+  scope: categorical palettes only. For a lone status/text color check WCAG text contrast; for a sequential ramp, lightness monotonicity.
+
+slot      hex      L     C    contrast
+random    #8C7B68 0.59 0.035 3.52
+spatial   #1F95B2 0.62 0.106 3.02
+ablation  #B5562A 0.56 0.136 4.19
+pair                 normal protan deutan tritan
+random-spatial         14.0   11.3   11.0   14.8
+random-ablation        11.0    9.7    7.1   13.6
+spatial-ablation       24.8   20.8   18.0   28.4

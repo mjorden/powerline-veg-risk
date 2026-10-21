@@ -79,17 +79,20 @@ download_tiles <- function(tiles, dest_dir = "data-raw/laz") {
 #'
 #' @param aoi An `sf`/`sfc` object or `bbox` defining the search window.
 #' @param ids Optional OSM way ids; if given, only these ways are returned.
+#' @param power OSM `power=*` values to fetch within `aoi`. The default takes
+#'   transmission (`line`) and distribution (`minor_line`) ways: both carry
+#'   suspended conductors, and a distribution wire crossing the corridor
+#'   would otherwise be taught to the classifier as vegetation. Underground
+#'   `cable` is deliberately left out. Ignored when `ids` is given.
 #' @param overpass_url Overpass endpoint.
 #' @return An `sf` LINESTRING data frame (EPSG:4326) with `osm_id`, `name`,
-#'   `voltage_kv`, `operator`.
+#'   `power`, `voltage_kv`, `operator`.
 #' @export
-osm_power_lines <- function(aoi = NULL, ids = NULL,
+osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_line"),
                             overpass_url = "https://overpass-api.de/api/interpreter") {
   if (is.null(ids)) {
     if (is.null(aoi)) rlang::abort("Supply `aoi` or `ids`.")
-    bb <- sf::st_bbox(sf::st_transform(sf::st_as_sfc(sf::st_bbox(aoi)), 4326))
-    sel <- sprintf('way["power"="line"](%f,%f,%f,%f);',
-                   bb["ymin"], bb["xmin"], bb["ymax"], bb["xmax"])
+    sel <- power_line_selector(aoi, power)
   } else {
     sel <- sprintf("way(id:%s);", paste(ids, collapse = ","))
   }
@@ -106,6 +109,7 @@ osm_power_lines <- function(aoi = NULL, ids = NULL,
   sf::st_sf(
     osm_id     = vapply(els, function(e) as.character(e$id), ""),
     name       = vapply(els, tag, "", "name"),
+    power      = vapply(els, tag, "", "power"),
     voltage_kv = volt,
     operator   = vapply(els, tag, "", "operator"),
     geometry   = sf::st_sfc(lapply(els, function(e) {
@@ -156,6 +160,16 @@ osm_buildings <- function(aoi, overpass_url = "https://overpass-api.de/api/inter
       sf::st_polygon(list(do.call(rbind, lapply(e$geometry, function(p) c(p$lon, p$lat)))))
     }), crs = 4326)
   )
+}
+
+# Overpass way selector for one or more power=* values inside the AOI.
+power_line_selector <- function(aoi, power) {
+  if (length(power) == 0 || any(!nzchar(power))) rlang::abort("`power` needs at least one tag value.")
+  if (length(power) == 1) {
+    sprintf('way["power"="%s"](%s);', power, osm_bbox(aoi))
+  } else {
+    sprintf('way["power"~"^(%s)$"](%s);', paste(power, collapse = "|"), osm_bbox(aoi))
+  }
 }
 
 # Overpass bbox string: south,west,north,east

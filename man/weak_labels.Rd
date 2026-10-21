@@ -47,7 +47,11 @@ across its 3 x 3 window.}
 \item{wire_min_m}{Minimum height for a wire label.}
 
 \item{wire_search_m}{Wire labels are only assigned within this horizontal
-distance of a mapped line (covers OSM misalignment and phase spacing).}
+distance of a mapped line (covers OSM misalignment and phase spacing).
+Suspended candidates farther away than this are never labelled wire,
+but they abstain (\code{NA}) rather than becoming vegetation: distribution,
+telecom and unmapped circuits are not in \code{lines}, and their conductors
+must not be taught as trees.}
 
 \item{run_half_m, row_m, min_run, min_extent_m, min_occupancy}{Along-line run
 test. For each candidate cell, its "row" is the candidates within

@@ -36,12 +36,47 @@ test_that("weak_labels separates suspended wire, trees, roofs and margins", {
   expect_true(all(is.na(lab$label[lab$part == "edge"])))
 })
 
-test_that("suspended points far from any mapped line are not labelled wire", {
+test_that("suspended points far from any mapped line abstain, not vegetation (#25)", {
   feat <- synthetic_feat()
   far_line <- sf::st_sf(geometry = sf::st_sfc(
     sf::st_linestring(rbind(c(x0, y0 + 500), c(x0 + 100, y0 + 500))), crs = utm))
   lab <- weak_labels(feat, utm, far_line)
   expect_false(any(lab$label == "wire", na.rm = TRUE))
+  # The suspended wire is an unmapped conductor here: it must not be taught
+  # as a tree, and the real tree must still be vegetation.
+  expect_true(all(is.na(lab$label[lab$part == "wire"])))
+  expect_true(all(lab$label[lab$part == "tree"] == "vegetation"))
+})
+
+test_that("an unmapped conductor crossing the corridor abstains at every distance (#25)", {
+  # Mapped N-S line at x = x0 with its own wire at 20 m; an unmapped wire at
+  # 9 m crosses it east-west, from 40 m west to 40 m east of the line.
+  ns_line <- sf::st_sf(geometry = sf::st_sfc(
+    sf::st_linestring(rbind(c(x0, y0 - 50), c(x0, y0 + 150))), crs = utm))
+  ys <- seq(0, 100, by = 0.25)
+  mapped <- data.table::data.table(X = x0 + 0.3, Y = y0 + ys, height_m = 20, part = "mapped")
+  xs <- seq(-40, 40, by = 0.25)
+  cross <- data.table::data.table(X = x0 + xs, Y = y0 + 50.3, height_m = 9, part = "crossing")
+  feat <- rbind(mapped, cross)
+  feat[, Z := height_m]
+  lab <- weak_labels(feat, utm, ns_line, wire_search_m = 12)
+  # At the crossing itself the two wires share cells (an 11 m thick layer),
+  # so only the mapped wire away from it is asserted.
+  mapped_clear <- lab$part == "mapped" & abs(lab$Y - (y0 + 50.3)) > 3
+  expect_true(all(lab$label[mapped_clear] == "wire"))
+  far <- lab$part == "crossing" & abs(lab$X - x0) > 12
+  expect_true(any(far))
+  expect_true(all(is.na(lab$label[far])))
+  expect_false(any(lab$label[lab$part == "crossing"] == "vegetation", na.rm = TRUE))
+})
+
+test_that("osm_power_lines builds a selector for one or several power tags", {
+  bb <- sf::st_bbox(c(xmin = -105.33, ymin = 40.00, xmax = -105.31, ymax = 40.03), crs = 4326)
+  expect_match(power_line_selector(bb, "line"), '^way\\["power"="line"\\]\\(', perl = TRUE)
+  sel <- power_line_selector(bb, c("line", "minor_line"))
+  expect_match(sel, 'way\\["power"~"\\^\\(line\\|minor_line\\)\\$"\\]', perl = TRUE)
+  expect_match(sel, "40.000000,-105.330000,40.030000,-105.310000", fixed = TRUE)
+  expect_error(power_line_selector(bb, character()), "at least one")
 })
 
 test_that("three parallel phases are labelled wire; a crown blob abstains", {
