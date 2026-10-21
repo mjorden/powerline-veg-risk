@@ -28,12 +28,12 @@ The 500 kV bundles were well sampled: 104,181 conductor returns, three phases at
 
 | class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
 |---|---:|---:|---:|---:|---:|
-| wire | 104,181 | 0.10 | **0.89** | 0.95 | 0.83 |
-| structure | 4,262 | 0.004 | 0.03 | 0.26 | 0.02 |
+| wire | 104,181 | 0.10 | **0.91** | 0.94 | 0.86 |
+| structure | 4,262 | 0.004 | 0.008 | 0.26 | 0.006 |
 
 ![Nashville cross-validation](../reference/figures/nashville_cv_metrics.png)
 
-Wires transfer across space here: average precision 0.89 against a no-skill 0.10, and 0.83 even without the height and echo features, the most direct proxies for the labelling rule. Structures (31 lattice towers) still don't.
+Wires transfer across space here: average precision 0.91 against a no-skill 0.10, and 0.86 even without the height and echo features, the most direct proxies for the labelling rule. Structures (31 lattice towers) still don't.
 
 **Against the vendor's classes.** These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can't show skill: predicting "vegetation" everywhere scores 0.992.
 
@@ -46,7 +46,7 @@ Wires transfer across space here: average precision 0.89 against a no-skill 0.10
 | **trained on vendor labels (spatial CV)** | 0.998 | **0.87** (AP 0.95) | 0.89 | — |
 
 - **On vegetation vs building, the weak-label pipeline has no skill at this site.** OSM maps one building in the corridor, so there are no building labels to learn from. The vendor's labels would buy a building F1 of 0.87. The weak models' lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.
-- **The Colorado model doesn't transfer.** With its own class prior it recalls 0% of Nashville's conductor returns. Threshold-free, its wire average precision is 0.23 against a 0.10 baseline (the Nashville model: 0.86). Its 0.992 vegetation F1 is exactly the baseline.
+- **The Colorado model doesn't transfer.** With its own class prior it recalls 0% of Nashville's conductor returns. Threshold-free, its wire average precision is 0.20 against a 0.10 baseline (the Nashville model: 0.86). Its 0.992 vegetation F1 is exactly the baseline.
 
 ## Vendor vegetation classes contain the conductors
 
@@ -55,10 +55,10 @@ Wires transfer across space here: average precision 0.89 against a no-skill 0.10
 | canopy model | grow-in | fall-in | clear |
 |---|---:|---:|---:|
 | vendor vegetation classes, as delivered | 39 | 0 | 0 |
-| vendor vegetation + this package's conductor removal | 0 | 9 | 30 |
+| vendor vegetation + this package's conductor removal | 0 | 10 | 29 |
 | **this package** (consensus vegetation + conductor removal) | **0** | **7** | **32** |
 
-- **The delivered classes would send crews to every span.** Removing conductor returns is the whole grow-in correction (39 → 0). Consensus labelling (model and weak rules agreeing on vegetation, vendor buildings removed) then trims fall-in from 9 segments to 7.
+- **The delivered classes would send crews to every span.** Removing conductor returns is the whole grow-in correction (39 → 0). Consensus labelling (model and weak rules agreeing on vegetation, vendor buildings removed) then trims fall-in from 10 segments to 7.
 - **No grow-in.** The managed right-of-way is clear under the conductors.
 - **The 32 clear segments were seen, not assumed.** Every segment has at least 91% of its corridor and of its grow-in zone observed (median 99%), so none is tiered `no data`. The lowest segment (0.36–0.41 km, 91% under the line) is still 16 points above the 75% threshold.
 - **24 strike trees across 7 segments,** 28–39 m from the centreline, the same under both bounds because the conductor is measured. They are the list to verify.
