@@ -249,7 +249,7 @@ OSM lines (Overpass) ─┘                │
 <li>
 <strong>vegetation:</strong> everything else.</li>
 </ul>
-<p>Elevated near-line candidates that fail the wire test <strong>abstain</strong> (NA) rather than becoming “vegetation”, so missed conductors aren’t taught as trees.</p>
+<p>Elevated suspended candidates that fail the wire test, or that lie beyond <code>wire_search_m</code> of any mapped line, <strong>abstain</strong> (NA) rather than becoming “vegetation”, so missed and unmapped conductors aren’t taught as trees. The mapped lines include OSM <code>power=minor_line</code> (distribution) as well as <code>power=line</code>.</p>
 <p><strong>Validation is spatial, and the gap is reported.</strong> Folds are 100 m spatial blocks; random folds are reported alongside. Precision is measured at real class prevalence, and the headline metric is average precision against its no-skill value. An ablation drops the features that encode the labelling rule (height, echo structure).</p>
 <p><strong>Class weighting is undone at prediction time.</strong> The forest trains with inverse-frequency case weights, i.e. under equal priors; <code><a href="reference/classify_probs.html">classify_probs()</a></code> multiplies by the true prevalence and renormalises. Without that, the Colorado model called about 25,000 vegetation points “wire”.</p>
 <p><strong>Conductor elevation is bounded, not guessed.</strong> <code><a href="reference/conductor_profile.html">conductor_profile()</a></code> uses classified conductor returns where they pass sanity checks: more than one mask radius from a structure (guy wires and crossarms are linear too), a robust low quantile per 5 m bin, above the code minimum, and at a plausible slope to neighbouring bins. Elsewhere it brackets the conductor:</p>
@@ -627,6 +627,8 @@ OSM lines (Overpass) ─┘                │
 <strong>Conductor removal is a judgement.</strong> Canopy within ~1.5 m beneath a conductor can’t be told apart from a conductor over dense canopy; both are kept as canopy and flagged as grow-in, which is the conservative choice.</li>
 <li>
 <strong>Second circuits</strong> are labelled and their towers masked, but only the study line gets a conductor profile; second-circuit returns over canopy can remain in the canopy model beyond the study line’s envelope.</li>
+<li>
+<strong>Conductors OSM doesn’t map</strong> (telecom and communication lines, unmapped circuits) are not labelled wire. Where they hang free they abstain and stay out of the canopy model; where they cross canopy they look like foliage and are kept as canopy, like any conductor over a crown.</li>
 <li>
 <strong>OSM geometry</strong> is volunteer-digitised. Conductor envelopes are sized from where returns actually are, not from the centreline alone.</li>
 <li>

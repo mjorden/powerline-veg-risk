@@ -51,7 +51,8 @@ hours whose wind would push the tree into that arc.</p>
 <span>  phase_offset_m <span class="op">=</span> <span class="fl">3</span>,</span>
 <span>  growth_m <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  spread_deg <span class="op">=</span> <span class="fl">15</span>,</span>
-<span>  windward_min <span class="op">=</span> <span class="fl">0.5</span></span>
+<span>  windward_min <span class="op">=</span> <span class="fl">0.5</span>,</span>
+<span>  min_hours <span class="op">=</span> <span class="fl">24</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -84,6 +85,12 @@ deviate from the wind direction.</p></dd>
 <dd><p>Share of fire-weather hours at or above which a strike
 tree counts as <em>windward</em> of the line.</p></dd>
 
+
+<dt id="arg-min-hours">min_hours<a class="anchor" aria-label="anchor" href="#arg-min-hours"></a></dt>
+<dd><p>Fewer fire-weather hours than this gives a warning: the
+hit shares then rest on a handful of hours. With none at all, every
+wind column is <code>NA</code>, not zero.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -93,9 +100,10 @@ hitting arc under each conductor bound; <code>NA</code> when it cannot reach),
 <code>wind_hit_lo</code>, <code>wind_hit_hi</code> (share of fire-weather hours that would
 throw it into the line), and segment columns <code>wind_strike_lo</code>,
 <code>wind_strike_hi</code> (sum of <code>wind_hit_*</code> over strike trees: the expected
-number thrown towards the line in a fire-weather hour) and
-<code>n_strike_windward_lo</code>, <code>n_strike_windward_hi</code>. The fire-wind summary is
-stored in <code>attr(risk$segments, "wind")</code>.</p>
+number thrown towards the line in a fire-weather hour),
+<code>n_strike_windward_lo</code>, <code>n_strike_windward_hi</code> and
+<code>n_fire_weather_hours</code> (so the hour count survives <code>st_write()</code>). The
+fire-wind summary is stored in <code>attr(risk$segments, "wind")</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>

@@ -41,6 +41,7 @@
     <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">osm_power_lines</span><span class="op">(</span></span>
 <span>  aoi <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  ids <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  power <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"line"</span>, <span class="st">"minor_line"</span><span class="op">)</span>,</span>
 <span>  overpass_url <span class="op">=</span> <span class="st">"https://overpass-api.de/api/interpreter"</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -57,6 +58,14 @@
 <dd><p>Optional OSM way ids; if given, only these ways are returned.</p></dd>
 
 
+<dt id="arg-power">power<a class="anchor" aria-label="anchor" href="#arg-power"></a></dt>
+<dd><p>OSM <code>power=*</code> values to fetch within <code>aoi</code>. The default takes
+transmission (<code>line</code>) and distribution (<code>minor_line</code>) ways: both carry
+suspended conductors, and a distribution wire crossing the corridor
+would otherwise be taught to the classifier as vegetation. Underground
+<code>cable</code> is deliberately left out. Ignored when <code>ids</code> is given.</p></dd>
+
+
 <dt id="arg-overpass-url">overpass_url<a class="anchor" aria-label="anchor" href="#arg-overpass-url"></a></dt>
 <dd><p>Overpass endpoint.</p></dd>
 
@@ -64,7 +73,7 @@
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>An <code>sf</code> LINESTRING data frame (EPSG:4326) with <code>osm_id</code>, <code>name</code>,
-<code>voltage_kv</code>, <code>operator</code>.</p>
+<code>power</code>, <code>voltage_kv</code>, <code>operator</code>.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

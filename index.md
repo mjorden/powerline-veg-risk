@@ -107,9 +107,11 @@ buffer would silently shrink 3.28×. Geographic CRSs are rejected.
   right-of-way are labelled too. Crown tops are compact and fail.
 - **vegetation:** everything else.
 
-Elevated near-line candidates that fail the wire test **abstain** (NA)
-rather than becoming “vegetation”, so missed conductors aren’t taught as
-trees.
+Elevated suspended candidates that fail the wire test, or that lie
+beyond `wire_search_m` of any mapped line, **abstain** (NA) rather than
+becoming “vegetation”, so missed and unmapped conductors aren’t taught
+as trees. The mapped lines include OSM `power=minor_line` (distribution)
+as well as `power=line`.
 
 **Validation is spatial, and the gap is reported.** Folds are 100 m
 spatial blocks; random folds are reported alongside. Precision is
@@ -418,6 +420,11 @@ Nashville cross-section
   study line gets a conductor profile; second-circuit returns over
   canopy can remain in the canopy model beyond the study line’s
   envelope.
+- **Conductors OSM doesn’t map** (telecom and communication lines,
+  unmapped circuits) are not labelled wire. Where they hang free they
+  abstain and stay out of the canopy model; where they cross canopy they
+  look like foliage and are kept as canopy, like any conductor over a
+  crown.
 - **OSM geometry** is volunteer-digitised. Conductor envelopes are sized
   from where returns actually are, not from the centreline alone.
 - **The structure mask** hides canopy close to each support, so strike

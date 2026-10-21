@@ -60,7 +60,8 @@ geometry) and whether the segment's grown-in canopy is dry
 <span>  min_gust_ms <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  max_rh <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  spread_deg <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  bound <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"lo"</span>, <span class="st">"hi"</span><span class="op">)</span></span>
+<span>  bound <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"lo"</span>, <span class="st">"hi"</span><span class="op">)</span>,</span>
+<span>  now <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/Sys.time.html" class="external-link">Sys.time</a></span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -94,13 +95,22 @@ for the climatology in <code>attr(risk$segments, "wind")</code>.</p></dd>
 <dd><p><code>"lo"</code> or <code>"hi"</code>: which conductor bound defines the strike
 trees and their arcs.</p></dd>
 
+
+<dt id="arg-now">now<a class="anchor" aria-label="anchor" href="#arg-now"></a></dt>
+<dd><p>Forecast hours before the start of this hour are already past
+and are dropped: NWS gridpoint layers begin at the start of the current
+period, hours before the request. Set it in tests to pin the clock.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A tibble, one row per segment with any flagged exposure, ordered
 by trees exposed: <code>seg_id</code>, <code>first_hour</code>, <code>n_hours</code>, <code>max_gust_ms</code>,
-<code>min_rh_pct</code>, <code>n_trees_exposed</code>, <code>red_flag</code>, <code>dry_grow_in</code>. Attribute
-<code>hours</code> holds the flagged forecast hours.</p>
+<code>min_rh_pct</code> (<code>NA</code> when the flagged hours carry no value, e.g. a Red
+Flag Warning over hours with no gust), <code>n_trees_exposed</code>, <code>red_flag</code>,
+<code>dry_grow_in</code>. Attribute <code>hours</code> holds the flagged forecast hours and
+attribute <code>settings</code> the thresholds, bound, clock and the number of past
+hours dropped, so a writer can record what the list was made with.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

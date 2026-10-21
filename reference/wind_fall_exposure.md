@@ -16,7 +16,8 @@ wind_fall_exposure(
   phase_offset_m = 3,
   growth_m = 0,
   spread_deg = 15,
-  windward_min = 0.5
+  windward_min = 0.5,
+  min_hours = 24
 )
 ```
 
@@ -53,6 +54,12 @@ wind_fall_exposure(
   Share of fire-weather hours at or above which a strike tree counts as
   *windward* of the line.
 
+- min_hours:
+
+  Fewer fire-weather hours than this gives a warning: the hit shares
+  then rest on a handful of hours. With none at all, every wind column
+  is `NA`, not zero.
+
 ## Value
 
 `risk` with added tree columns `bearing_deg` (grid bearing from the tree
@@ -61,8 +68,9 @@ under each conductor bound; `NA` when it cannot reach), `wind_hit_lo`,
 `wind_hit_hi` (share of fire-weather hours that would throw it into the
 line), and segment columns `wind_strike_lo`, `wind_strike_hi` (sum of
 `wind_hit_*` over strike trees: the expected number thrown towards the
-line in a fire-weather hour) and `n_strike_windward_lo`,
-`n_strike_windward_hi`. The fire-wind summary is stored in
+line in a fire-weather hour), `n_strike_windward_lo`,
+`n_strike_windward_hi` and `n_fire_weather_hours` (so the hour count
+survives `st_write()`). The fire-wind summary is stored in
 `attr(risk$segments, "wind")`.
 
 ## Details

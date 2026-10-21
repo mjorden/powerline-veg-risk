@@ -8,6 +8,7 @@ Fetch overhead power lines from OpenStreetMap
 osm_power_lines(
   aoi = NULL,
   ids = NULL,
+  power = c("line", "minor_line"),
   overpass_url = "https://overpass-api.de/api/interpreter"
 )
 ```
@@ -22,6 +23,14 @@ osm_power_lines(
 
   Optional OSM way ids; if given, only these ways are returned.
 
+- power:
+
+  OSM `power=*` values to fetch within `aoi`. The default takes
+  transmission (`line`) and distribution (`minor_line`) ways: both carry
+  suspended conductors, and a distribution wire crossing the corridor
+  would otherwise be taught to the classifier as vegetation. Underground
+  `cable` is deliberately left out. Ignored when `ids` is given.
+
 - overpass_url:
 
   Overpass endpoint.
@@ -29,4 +38,4 @@ osm_power_lines(
 ## Value
 
 An `sf` LINESTRING data frame (EPSG:4326) with `osm_id`, `name`,
-`voltage_kv`, `operator`.
+`power`, `voltage_kv`, `operator`.

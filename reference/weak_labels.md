@@ -69,7 +69,11 @@ weak_labels(
 - wire_search_m:
 
   Wire labels are only assigned within this horizontal distance of a
-  mapped line (covers OSM misalignment and phase spacing).
+  mapped line (covers OSM misalignment and phase spacing). Suspended
+  candidates farther away than this are never labelled wire, but they
+  abstain (`NA`) rather than becoming vegetation: distribution, telecom
+  and unmapped circuits are not in `lines`, and their conductors must
+  not be taught as trees.
 
 - run_half_m, row_m, min_run, min_extent_m, min_occupancy:
 

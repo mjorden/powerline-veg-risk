@@ -49,10 +49,16 @@ model decides <em>which</em> 30 m pixels to read and how much each one counts:</
 <span>  zone_m <span class="op">=</span> <span class="fl">6</span>,</span>
 <span>  corridor_m <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  cover_min_m <span class="op">=</span> <span class="fl">2</span>,</span>
+<span>  structures <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  structure_mask_m <span class="op">=</span> <span class="fl">8</span>,</span>
+<span>  min_support <span class="op">=</span> <span class="fl">6</span>,</span>
 <span>  min_canopy_frac <span class="op">=</span> <span class="fl">0.5</span>,</span>
+<span>  min_coverage <span class="op">=</span> <span class="fl">0.8</span>,</span>
+<span>  min_obs <span class="op">=</span> <span class="fl">3</span>,</span>
 <span>  dry_index <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"ndvi"</span>, <span class="st">"ndmi"</span><span class="op">)</span>,</span>
 <span>  dry_quantile <span class="op">=</span> <span class="fl">0.25</span>,</span>
 <span>  min_canopy_m2 <span class="op">=</span> <span class="fl">5</span>,</span>
+<span>  min_canopy_px <span class="op">=</span> <span class="fl">2</span>,</span>
 <span>  min_ref_px <span class="op">=</span> <span class="fl">20</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -95,8 +101,31 @@ uses the farthest canopy return from the line.</p></dd>
 <dd><p>Canopy height counted as cover.</p></dd>
 
 
+<dt id="arg-structures-structure-mask-m">structures, structure_mask_m<a class="anchor" aria-label="anchor" href="#arg-structures-structure-mask-m"></a></dt>
+<dd><p>As in <code><a href="assess_risk.html">assess_risk()</a></code>: support points
+(OSM nodes and line vertices) whose surroundings are treated as unknown
+rather than canopy or bare ground. Pass the same objects as to
+<code><a href="assess_risk.html">assess_risk()</a></code> so both screens describe the same canopy.</p></dd>
+
+
+<dt id="arg-min-support">min_support<a class="anchor" aria-label="anchor" href="#arg-min-support"></a></dt>
+<dd><p>As in <code><a href="assess_risk.html">assess_risk()</a></code>: a cell counts as canopy only if
+at least this many cells of its 3 x 3 window are canopy. <code>0</code> disables
+the filter.</p></dd>
+
+
 <dt id="arg-min-canopy-frac">min_canopy_frac<a class="anchor" aria-label="anchor" href="#arg-min-canopy-frac"></a></dt>
-<dd><p>Minimum canopy fraction of a Landsat pixel for it to
+<dd><p>Minimum canopy fraction (of observed cells) for a
+Landsat pixel to be scored.</p></dd>
+
+
+<dt id="arg-min-coverage">min_coverage<a class="anchor" aria-label="anchor" href="#arg-min-coverage"></a></dt>
+<dd><p>Minimum share of a pixel's 30 m footprint observed by
+the LiDAR for it to be scored.</p></dd>
+
+
+<dt id="arg-min-obs">min_obs<a class="anchor" aria-label="anchor" href="#arg-min-obs"></a></dt>
+<dd><p>Minimum clear Landsat observations behind a pixel for it to
 be scored.</p></dd>
 
 
@@ -109,14 +138,15 @@ be scored.</p></dd>
 <code>dry_canopy</code>.</p></dd>
 
 
-<dt id="arg-min-canopy-m-">min_canopy_m2<a class="anchor" aria-label="anchor" href="#arg-min-canopy-m-"></a></dt>
-<dd><p>Segments with less grown-in canopy than this (in
-scored pixels) get their indices but no percentile or <code>dry_canopy</code>.</p></dd>
+<dt id="arg-min-canopy-m-min-canopy-px">min_canopy_m2, min_canopy_px<a class="anchor" aria-label="anchor" href="#arg-min-canopy-m-min-canopy-px"></a></dt>
+<dd><p>Segments with less grown-in canopy than
+this (in scored pixels), or spread over fewer scored pixels, get their
+indices but no percentile or <code>dry_canopy</code>.</p></dd>
 
 
 <dt id="arg-min-ref-px">min_ref_px<a class="anchor" aria-label="anchor" href="#arg-min-ref-px"></a></dt>
-<dd><p>Minimum canopy-dominated pixels in the corridor needed to
-compute percentiles; below it the <code>*_pct</code> columns are <code>NA</code>.</p></dd>
+<dd><p>Minimum scored pixels in the corridor needed to compute
+percentiles; below it the <code>*_pct</code> columns are <code>NA</code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -125,22 +155,33 @@ compute percentiles; below it the <code>*_pct</code> columns are <code>NA</code>
 <code>canopy_px</code>, <code>canopy_m2</code>, <code>ndvi</code>, <code>ndmi</code>, <code>ndvi_pct</code>, <code>ndmi_pct</code>,
 <code>dry_canopy</code>, <code>dry_grow_in</code>, <code>dry_grow_in_lo</code>) and <code>pixels</code> (<code>sf</code>
 points at Landsat pixel centres with <code>ndvi</code>, <code>ndmi</code>, <code>n_obs</code>,
-<code>canopy_frac</code>, <code>scored</code>).</p>
+<code>canopy_frac</code>, <code>coverage</code>, <code>scored</code>). <code>attr(segments, "landsat")</code>
+records the gates and how many pixels each one excluded.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
 
-<ol><li><p>Each Landsat pixel's canopy fraction is the share of its 1 m CHM cells
-at or above <code>cover_min_m</code>. Pixels below <code>min_canopy_frac</code> are mostly
-cleared right-of-way, road or roof, and are not scored - their index
-would describe the gap, not the trees.</p></li>
+<ol><li><p>The CHM is cleaned the way <code><a href="assess_risk.html">assess_risk()</a></code> cleans it: cells within
+<code>structure_mask_m</code> of a support are unknown, and canopy needs
+<code>min_support</code> canopy cells in its 3 x 3 window (removes 1-2 cell poles
+and stray returns). Each Landsat pixel's canopy fraction is then the
+share of its <em>observed</em> 1 m cells at or above <code>cover_min_m</code>, and its
+coverage is the share of its whole 30 m footprint that the LiDAR
+observed. A pixel is scored only if it is canopy-dominated
+(<code>min_canopy_frac</code>), mostly observed (<code>min_coverage</code>: a pixel on the
+corridor edge or inside a bend otherwise rests on a sliver of canopy
+and its reflectance describes land outside the LiDAR clip) and has
+enough clear looks (<code>min_obs</code>).</p></li>
 <li><p>A segment's value is the mean of its pixels' indices weighted by how
 many of the segment's canopy cells <em>within <code>zone_m</code> of the line</em> fall
 in each pixel, so it describes the canopy under the conductors rather
 than the forest beside the right-of-way.</p></li>
-<li><p>Each segment value is ranked against every canopy-dominated pixel in
-the corridor (a percentile, <code>*_pct</code>). <code>dry_canopy</code> flags segments in
-the lowest <code>dry_quantile</code> of <code>dry_index</code>.</p></li>
+<li><p>Each segment value is ranked against every scored pixel in the
+corridor (a percentile, <code>*_pct</code>). <code>dry_canopy</code> flags segments in the
+lowest <code>dry_quantile</code> of <code>dry_index</code>. A segment resting on fewer than
+<code>min_canopy_px</code> pixels, or on less than <code>min_canopy_m2</code> of canopy,
+keeps its indices but gets no percentile: one mixed 30 m pixel cannot
+carry a ranking.</p></li>
 </ol><p><code>dry_grow_in</code> combines the two screens: grow-in under the optimistic
 conductor bound and dry canopy; <code>dry_grow_in_lo</code> uses the pessimistic
 tier. This is a prioritisation within one corridor, not a fire-danger

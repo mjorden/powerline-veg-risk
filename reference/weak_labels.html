@@ -102,7 +102,11 @@ across its 3 x 3 window.</p></dd>
 
 <dt id="arg-wire-search-m">wire_search_m<a class="anchor" aria-label="anchor" href="#arg-wire-search-m"></a></dt>
 <dd><p>Wire labels are only assigned within this horizontal
-distance of a mapped line (covers OSM misalignment and phase spacing).</p></dd>
+distance of a mapped line (covers OSM misalignment and phase spacing).
+Suspended candidates farther away than this are never labelled wire,
+but they abstain (<code>NA</code>) rather than becoming vegetation: distribution,
+telecom and unmapped circuits are not in <code>lines</code>, and their conductors
+must not be taught as trees.</p></dd>
 
 
 <dt id="arg-run-half-m-row-m-min-run-min-extent-m-min-occupancy">run_half_m, row_m, min_run, min_extent_m, min_occupancy<a class="anchor" aria-label="anchor" href="#arg-run-half-m-row-m-min-run-min-extent-m-min-occupancy"></a></dt>
