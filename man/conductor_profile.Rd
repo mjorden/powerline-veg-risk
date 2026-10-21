@@ -52,8 +52,9 @@ adjacent measured bins.}
 \item{min_ground_clear_m, attach_m, max_span_m}{Bounds parameters, metres.}
 }
 \value{
-data.frame of vertices: \code{line_id}, \code{x}, \code{y}, \code{s_m}, \code{seg_id},
-\code{ground}, \code{z_lo}, \code{z_hi}, \code{src}.
+data.frame of vertices: \code{line_id}, \code{x}, \code{y}, \code{tx}, \code{ty} (unit
+tangent along the line), \code{s_m}, \code{seg_id}, \code{ground}, \code{z_lo}, \code{z_hi},
+\code{src}.
 }
 \description{
 Conductor returns are points the wire rule labelled (\code{label == "wire"}) or

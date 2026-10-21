@@ -71,7 +71,10 @@ test_that("evaluate_vendor_classes maps ASPRS codes and ignores unclassified", {
   expect_equal(v$precision, 2 / 3)
   expect_equal(b$recall, 0.5)
   expect_equal(sum(ev$confusion), 4) # the unclassified (1) point is excluded
-  expect_equal(v$balanced_accuracy, 0.75)
+  expect_equal(ev$summary$balanced_accuracy, 0.75)
+  expect_equal(ev$summary$n, 4)
+  # Scheme-level scalars live in `summary`, not recycled onto class rows (#22)
+  expect_false(any(c("balanced_accuracy", "kappa") %in% names(ev$metrics)))
 })
 
 test_that("evaluate_vendor_classes exposes the majority-class baseline", {
@@ -79,8 +82,9 @@ test_that("evaluate_vendor_classes exposes the majority-class baseline", {
   ev <- evaluate_vendor_classes(factor(rep("vegetation", 100), levels = label_levels), vc)
   b <- ev$metrics[ev$metrics$class == "building", ]
   expect_equal(b$precision, 0)          # never predicted -> 0, not NA
-  expect_equal(ev$metrics$kappa[1], 0)  # no skill
-  expect_equal(ev$metrics, ev$baseline)
+  expect_equal(ev$summary$kappa, 0)     # no skill
+  expect_equal(ev$metrics, ev$baseline$metrics)
+  expect_equal(ev$summary, ev$baseline$summary)
   expect_gt(ev$metrics$f1[1], 0.98)     # high vegetation F1 despite no skill
 })
 
@@ -96,7 +100,7 @@ test_that("evaluate_vendor_classes handles a mapped class with no vendor points 
   expect_true(is.na(b$f1))
   expect_equal(b$precision, 0)              # predicted building where there is none
   expect_equal(v$recall, 2 / 3)
-  expect_equal(v$balanced_accuracy, 2 / 3)  # absent class left out, not NaN
+  expect_equal(ev$summary$balanced_accuracy, 2 / 3)  # absent class left out, not NaN
   # Neither predicted nor present: precision is undefined too.
   ev2 <- evaluate_vendor_classes(factor(rep("vegetation", 3), levels = label_levels), c(3L, 4L, 5L))
   expect_true(is.na(ev2$metrics$precision[ev2$metrics$class == "building"]))
@@ -108,7 +112,7 @@ test_that("evaluate_vendor_classes returns NA metrics, not an error, when nothin
                  "No points")
   expect_equal(nrow(ev$metrics), 2)
   expect_true(all(is.na(ev$metrics$recall)))
-  expect_true(all(is.na(ev$metrics$kappa)))
+  expect_true(is.na(ev$summary$kappa))
   expect_equal(ev$metrics$n, c(0L, 0L))
   # Only unclassified/ground vendor points: same.
   expect_warning(evaluate_vendor_classes(factor(c("vegetation", "wire"), levels = label_levels),

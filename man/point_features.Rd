@@ -16,7 +16,9 @@ featurised (they are ground / low cover, handled by the ground class).}
 }
 \value{
 A \code{data.table} with \code{pid} (row index into \code{las@data}), \code{X}, \code{Y},
-\code{Z}, and feature columns.
+\code{Z}, and feature columns. Attributes \code{crs} (the CRS of \code{las}), \code{k} and
+\code{features} (the predictor column names) travel with the table through
+\code{\link[=weak_labels]{weak_labels()}}, \code{\link[=assign_blocks]{assign_blocks()}} and \code{\link[=predict_points]{predict_points()}}.
 }
 \description{
 Compute per-point classification features

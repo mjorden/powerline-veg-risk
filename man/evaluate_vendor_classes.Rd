@@ -19,10 +19,12 @@ same length as \code{labels}.}
 \item{map}{Named list mapping package labels to vendor class codes.}
 }
 \value{
-A list with \code{metrics} (per-class precision, recall, F1, n, plus
-\code{balanced_accuracy} and \code{kappa}), \code{baseline} (the same for predicting
-the majority class everywhere) and \code{confusion}. With no points in a
-mapped vendor class, every metric is \code{NA} (with a warning).
+A list with \code{metrics} (one row per mapped class: \code{n},
+\code{prevalence}, \code{predicted}, \code{precision}, \code{recall}, \code{f1}), \code{summary} (one
+row: \code{n} points scored, \code{balanced_accuracy}, \code{kappa}), \code{baseline} (a
+list with the same \code{metrics} and \code{summary} for predicting the majority
+class everywhere) and \code{confusion}. With no points in a mapped vendor
+class, every metric is \code{NA} (with a warning).
 }
 \description{
 Some 3DEP deliveries classify vegetation (ASPRS 3-5) and buildings (6).

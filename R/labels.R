@@ -29,7 +29,8 @@
 #' Assign weak labels to featurised points
 #'
 #' @param feat Output of [point_features()].
-#' @param crs CRS of the point cloud.
+#' @param crs CRS of the point cloud; defaults to the one recorded by
+#'   [point_features()] and must agree with it when both are given.
 #' @param lines,structures,buildings `sf` layers from OSM (any CRS).
 #' @param cell_m 2D cell size for the air-gap test.
 #' @param gap_floor_m Points below this height are ignored by the air-gap test
@@ -58,15 +59,16 @@
 #' @return `feat` with a factor column `label` (levels vegetation, wire,
 #'   structure, building; NA = unlabelled).
 #' @export
-weak_labels <- function(feat, crs, lines, structures = NULL, buildings = NULL,
+weak_labels <- function(feat, crs = NULL, lines, structures = NULL, buildings = NULL,
                         cell_m = 1, gap_floor_m = 2, layer_m = 4, gap_m = 2,
                         wire_min_m = 6, wire_search_m = 12,
                         run_half_m = 10, min_run = 6, min_extent_m = 12,
                         row_m = 1.5, min_occupancy = 0.4,
                         structure_radius_m = 3, building_shrink_m = 1,
                         margin_m = 2) {
+  feat <- data.table::copy(as_point_table(feat))
+  crs <- feat_crs(feat, crs)
   m <- crs_m_per_unit(crs)
-  feat <- data.table::copy(feat)
   pts <- sf::st_as_sf(feat[, c("X", "Y")], coords = c("X", "Y"), crs = crs)
   lab <- rep(NA_character_, nrow(feat))
   ambiguous <- rep(FALSE, nrow(feat))

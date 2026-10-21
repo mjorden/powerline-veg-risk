@@ -8,6 +8,19 @@ suppressPackageStartupMessages({
   library(data.table)
 })
 
+# Write-then-rename, so a crash mid-write never leaves a truncated RDS that
+# a VEGRISK_REUSE run would read as a complete one (#30).
+save_rds <- function(x, path) {
+  tmp <- paste0(path, ".tmp")
+  saveRDS(x, tmp)
+  if (!file.rename(tmp, path)) stop("could not replace ", path, call. = FALSE)
+  invisible(path)
+}
+git_sha <- function() {
+  tryCatch(system2("git", c("rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE),
+           error = function(e) NA_character_, warning = function(w) NA_character_)
+}
+
 run_case_study <- function(cfg) {
   out <- file.path("output", cfg$id)
   raw <- file.path("data-raw", cfg$id)
@@ -15,6 +28,9 @@ run_case_study <- function(cfg) {
   dir.create(raw, showWarnings = FALSE, recursive = TRUE)
   fig <- function(name) file.path("man/figures", paste0(cfg$id, "_", name, ".png"))
   t0 <- Sys.time()
+  # Every artefact of this run carries the same id; a reused model carries
+  # the id of the run that fitted it.
+  run_id <- paste0(format(t0, "%Y%m%dT%H%M%SZ", tz = "UTC"), "-", git_sha())
   step <- function(...) message(sprintf("[%s %5.0fs] ", cfg$id, as.numeric(Sys.time() - t0, units = "secs")), ...)
   # OSM layers are cached as GeoJSON with a sidecar recording the OSM
   # snapshot time and the query. An empty answer is not cached: Overpass
@@ -86,28 +102,45 @@ run_case_study <- function(cfg) {
   print(table(feat$label, useNA = "ifany"))
   print(table(fold = feat$fold, label = feat$label))
 
-  # VEGRISK_REUSE=1 reuses the saved model, cross-validation and vendor
-  # evaluation (the slow, deterministic part) and recomputes the rest.
-  reuse <- Sys.getenv("VEGRISK_REUSE") == "1" &&
-    all(file.exists(file.path(out, c("summary.rds", "model.rds"))))
+  # VEGRISK_REUSE=1 reuses the saved model, its cross-validation and the
+  # vendor evaluation (the slow, deterministic part) and recomputes the rest.
+  # model.rds holds the model *and* the CV results it was fitted alongside,
+  # written in one atomic step, so a rerun can never pair a new model with
+  # an old run's metrics; summary.rds records which run it came from (#30).
+  fit_path <- file.path(out, "model.rds")
+  reuse <- Sys.getenv("VEGRISK_REUSE") == "1" && file.exists(fit_path)
   if (reuse) {
-    old <- readRDS(file.path(out, "summary.rds"))
-    metrics <- old$metrics
-    cv <- list(confusion = old$confusion, fold_counts = old$fold_counts)
-    model <- readRDS(file.path(out, "model.rds"))
-    step("reusing saved model and cross-validation results")
+    fit <- readRDS(fit_path)
+    if (is.null(fit$cv)) stop(fit_path, " predates the run record (#30); run once without VEGRISK_REUSE.",
+                              call. = FALSE)
+    model <- fit$model
+    cv <- fit$cv
+    metrics <- cv$metrics
+    cv_summary <- cv$summary
+    reused_from <- list(run_id = fit$run_id, fitted_at = fit$fitted_at,
+                        model_md5 = unname(tools::md5sum(fit_path)))
+    step("reusing model and cross-validation from run ", fit$run_id)
   } else {
     cv <- cv_point_classifier(feat)
     ablation <- cv_point_classifier(feat, drop_features = rule_proxy_features)
     ablation$metrics <- ablation$metrics[ablation$metrics$scheme == "spatial_block", ]
     ablation$metrics$scheme <- "spatial_ablation"
+    ablation$summary <- ablation$summary[ablation$summary$scheme == "spatial_block", ]
+    ablation$summary$scheme <- "spatial_ablation"
     metrics <- rbind(cv$metrics, ablation$metrics)
+    cv_summary <- rbind(cv$summary, ablation$summary)
     step("cross-validation done")
     model <- train_point_classifier(feat)
-    saveRDS(model, file.path(out, "model.rds"))
+    fit <- list(run_id = run_id, fitted_at = t0, git_sha = git_sha(), model = model,
+                cv = list(metrics = metrics, summary = cv_summary,
+                          confusion = cv$confusion, fold_counts = cv$fold_counts))
+    save_rds(fit, fit_path)
+    reused_from <- NULL
   }
   print(metrics, digits = 3)
+  print(cv_summary, digits = 3)
   fwrite(metrics, file.path(out, "cv_metrics.csv"))
+  fwrite(cv_summary, file.path(out, "cv_summary.csv"))
   pred <- predict_points(model, feat)
   print(table(predicted = pred$pred, weak_label = pred$label, useNA = "ifany"))
 
@@ -155,10 +188,16 @@ run_case_study <- function(cfg) {
     zabs >= profile$z_lo[pr_all$vertex] - 3
 
   # --- 5. Classifier vs vendor ground truth -------------------------------------
+  # The vendor evaluation is reused only when it was computed from the model
+  # being reused (same run id); otherwise it is recomputed.
   vendor <- NULL
-  if (reuse && !is.null(old$vendor)) {
-    vendor <- old$vendor
-  } else if (has_vendor) {
+  vendor_path <- file.path(out, "vendor.rds")
+  if (reuse && file.exists(vendor_path)) {
+    v <- readRDS(vendor_path)
+    if (identical(v$model_run_id, fit$run_id)) vendor <- v$vendor
+    else step("vendor evaluation on disk is from another run; recomputing")
+  }
+  if (is.null(vendor) && has_vendor) {
     sc <- !conductor_zone  # same scored set for every method
     cut_vc <- function(x) cut(x, c(-Inf, 1, 2, 5, 6, Inf),
                               labels = c("unclassified", "ground", "vegetation", "building", "other"))
@@ -180,32 +219,44 @@ run_case_study <- function(cfg) {
     )
     if (!is.null(cfg$transfer_from)) {
       path <- file.path("output", cfg$transfer_from, "model.rds")
-      other <- readRDS(path)
+      other_fit <- readRDS(path)
+      if (is.null(other_fit$model)) stop(path, " predates the run record (#30); re-run ",
+                                         cfg$transfer_from, " first.", call. = FALSE)
+      other <- other_fit$model
       p <- classify_probs(other, feat)  # with the other site's class prior
       lab <- factor(colnames(p)[max.col(p, "first")], levels = label_levels)
       vendor$transfer <- evaluate_vendor_classes(lab[sc], vc[sc])
       vendor$transfer_wire <- wire_skill(lab, raw_wire(other))  # AP is prior-free
-      vendor$transfer_model <- list(path = path, mtime = file.mtime(path))
+      vendor$transfer_model <- list(path = path, run_id = other_fit$run_id,
+                                    fitted_at = other_fit$fitted_at, md5 = unname(tools::md5sum(path)))
     }
     # Vendor-supervised reference (vegetation/building only), spatial CV.
     vfeat <- data.table::copy(feat)
     vfeat[, label := factor(ifelse(vc %in% 3:5, "vegetation", ifelse(vc == 6L, "building", NA)),
                             levels = label_levels)]
     vfeat[conductor_zone, label := NA]
-    vendor$reference <- cv_point_classifier(vfeat, random = FALSE)$metrics
+    ref <- cv_point_classifier(vfeat, random = FALSE)
+    vendor$reference <- ref$metrics
+    vendor$reference_summary <- ref$summary
+    save_rds(list(model_run_id = fit$run_id, vendor = vendor), vendor_path)
 
     step("vendor classes in the conductor zone, and of rule-labelled conductor returns:")
     print(vendor$conductor_zone_vendor_class)
     print(vendor$rule_wire_vendor_class)
     step("vs vendor (outside conductor zone): baseline / weak labels / model / transfer")
     for (nm in c("weak", "model", "transfer")) if (!is.null(vendor[[nm]])) {
-      if (nm == "weak") print(vendor$weak$baseline, digits = 3)
+      if (nm == "weak") {
+        print(vendor$weak$baseline$metrics, digits = 3)
+        print(vendor$weak$baseline$summary, digits = 3)
+      }
       print(vendor[[nm]]$metrics, digits = 3)
+      print(vendor[[nm]]$summary, digits = 3)
     }
     step("wire skill (rule labels): model / transfer")
     print(rbind(model = vendor$model_wire, transfer = vendor$transfer_wire), digits = 3)
     step("vendor-supervised reference (spatial CV):")
     print(vendor$reference, digits = 3)
+    print(vendor$reference_summary, digits = 3)
   }
 
   # --- 6. Risk ----------------------------------------------------------------
@@ -256,26 +307,46 @@ run_case_study <- function(cfg) {
     lc <- cfg[["landsat"]]
     comp_path <- file.path(out, "landsat_composite.tif")
     scenes_path <- file.path(out, "landsat_scenes.csv")
+    # landsat_scenes.csv lists every scene found, with `used` and
+    # `skip_reason`. A composite that lost scenes to read errors (not to
+    # "no coverage") is used this run but not cached, so a network blip
+    # cannot become permanent (#30).
     if (file.exists(comp_path) && file.exists(scenes_path)) {
       comp <- terra::rast(comp_path)
-      used <- fread(scenes_path)
+      scene_log <- fread(scenes_path)
+      if (!"used" %in% names(scene_log)) scene_log[, `:=`(used = TRUE, skip_reason = NA_character_)]
+      used <- scene_log[used == TRUE]
       attr(comp, "scenes") <- used$id
       attr(comp, "dates") <- as.Date(used$datetime)
+      attr(comp, "scene_log") <- as.data.frame(scene_log)
     } else {
       corridor_area <- st_buffer(study, cfg$half_width_m / m)
       scenes <- landsat_scenes(corridor_area, years = lc$years, months = lc$months)
       comp <- landsat_composite(scenes, corridor_area)
-      terra::writeRaster(comp, comp_path, overwrite = TRUE)
-      fwrite(scenes[scenes$id %in% attr(comp, "scenes"), c("id", "datetime", "platform", "cloud_cover")],
-             scenes_path)
+      scene_log <- merge(scenes[, c("id", "datetime", "platform", "cloud_cover")],
+                         attr(comp, "scene_log")[, c("id", "used", "skip_reason")], by = "id")
+      errored <- !scene_log$used & !scene_log$skip_reason %in% "no coverage"
+      max_err <- if (is.null(lc$max_error_frac)) 0.2 else lc$max_error_frac
+      if (mean(errored) > max_err) {
+        warning(sprintf(paste("Landsat: %d of %d scenes failed to read; the composite is used for this run",
+                              "but not cached. Re-run, or raise landsat$max_error_frac to accept it."),
+                        sum(errored), nrow(scene_log)), call. = FALSE)
+      } else {
+        terra::writeRaster(comp, comp_path, overwrite = TRUE)
+        fwrite(scene_log, scenes_path)
+      }
     }
+    scene_counts <- c(found = nrow(scene_log), used = sum(scene_log$used),
+                      no_coverage = sum(scene_log$skip_reason %in% "no coverage"),
+                      error = sum(!scene_log$used & !scene_log$skip_reason %in% "no coverage"))
     dryness <- canopy_dryness(comp, rasters, profile, risk, zone_m = cfg$under_line_m,
                               corridor_m = cfg$half_width_m,
                               structures = mask_supports, structure_mask_m = cfg$structure_mask_m,
                               dry_index = if (is.null(lc$dry_index)) "ndvi" else lc$dry_index)
     li <- attr(dryness$segments, "landsat")
-    step(sprintf("Landsat: %d dry-season scenes; %d scored canopy pixels (excluded: %d under %.0f%% canopy, %d under %.0f%% coverage, %d under %d clear looks)",
-                 length(attr(comp, "scenes")), li$n_ref_px,
+    step(sprintf("Landsat: %d of %d dry-season scenes used (%d no coverage, %d read errors); %d scored canopy pixels (excluded: %d under %.0f%% canopy, %d under %.0f%% coverage, %d under %d clear looks)",
+                 scene_counts[["used"]], scene_counts[["found"]], scene_counts[["no_coverage"]],
+                 scene_counts[["error"]], li$n_ref_px,
                  li$n_px_excluded[["canopy_frac"]], 100 * li$min_canopy_frac,
                  li$n_px_excluded[["coverage"]], 100 * li$min_coverage,
                  li$n_px_excluded[["n_obs"]], li$min_obs))
@@ -326,9 +397,13 @@ run_case_study <- function(cfg) {
   st_write(risk$trees, file.path(out, "trees.gpkg"), delete_dsn = TRUE, quiet = TRUE)
   fwrite(st_drop_geometry(risk$segments), file.path(out, "segments.csv"))
   fwrite(profile, file.path(out, "conductor_profile.csv"))
-  summary <- list(metrics = metrics, confusion = cv$confusion, fold_counts = cv$fold_counts,
+  summary <- list(run = list(id = run_id, started = t0, git_sha = git_sha(),
+                             model_run_id = fit$run_id, reused_from = reused_from),
+                  metrics = metrics, cv_summary = cv_summary,
+                  confusion = cv$confusion, fold_counts = cv$fold_counts,
                   importance = model$variable.importance, vendor = vendor,
-                  vendor_screens = vendor_screens, envelope_m = envelope_m,
+                  vendor_screens = vendor_screens,
+                  envelope_m = envelope_m, envelope_needed = envelope_needed,
                   label_table = table(feat$label, useNA = "ifany"), pred_table = table(pred$pred),
                   frac_measured = mean(profile$src == "measured"),
                   frac_unbounded = mean(is.infinite(profile$z_hi)),
@@ -337,6 +412,7 @@ run_case_study <- function(cfg) {
                   n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi)),
                   n_conductor_excluded = rasters$n_conductor_excluded,
                   landsat = if (!is.null(dryness)) attr(dryness$segments, "landsat"),
+                  landsat_scenes = if (!is.null(dryness)) scene_counts,
                   wind = if (!is.null(attr(risk$segments, "wind"))) {
                     w <- attr(risk$segments, "wind")
                     w$dir_from_deg <- NULL  # the hours are in wind_hourly.csv
@@ -346,7 +422,7 @@ run_case_study <- function(cfg) {
                     c(hi = sum(dryness$segments$dry_grow_in, na.rm = TRUE),
                       lo = sum(dryness$segments$dry_grow_in_lo, na.rm = TRUE))
                   })
-  saveRDS(summary, file.path(out, "summary.rds"))
+  save_rds(summary, file.path(out, "summary.rds"))
 
   # --- 7. Figures -------------------------------------------------------------
   plot_risk_map(rasters, risk, supports, title = cfg$title, source = cfg$source,
