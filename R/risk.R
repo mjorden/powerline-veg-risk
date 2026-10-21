@@ -9,7 +9,10 @@
 #
 # Fall-in geometry: a tree of height h pivoting at its base sweeps a sphere
 # of radius h, so it can strike the line if the 3D distance from its base to
-# the nearest conductor point is <= h (+ growth allowance). The vertical
+# the nearest conductor point is <= h (+ growth allowance). "Nearest" is the
+# minimum over every conductor vertex the tree could reach, not the vertex
+# at the tree's own station: on a sloping or sagging span the conductor a
+# few metres along the line is often closer in 3D (#19). The vertical
 # component uses the DTM at the tree and the modelled conductor elevation, so
 # terrain matters: a tree whose base sits a little below the conductor (e.g.
 # on a canyon wall above a low span) needs far less height to reach it than
@@ -422,8 +425,10 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #' @return A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
 #'   treetops: `seg_id`, `height_m`, `dh_m` horizontal distance to the
 #'   nearest conductor, `reach_lo_m` / `reach_hi_m` the height a tree there
-#'   needs to reach the conductor under each bound, `strike_lo` /
-#'   `strike_hi` / `strike` whether it does). Columns ending `_lo` / `_hi`
+#'   needs to reach the conductor under each bound (the minimum 3D distance
+#'   to any conductor vertex within reach, less the phase offset),
+#'   `dz_lo_m` / `dz_hi_m` the conductor's height above the tree's base at
+#'   that vertex, `strike_lo` / `strike_hi` / `strike` whether it does). Columns ending `_lo` / `_hi`
 #'   use the lower / upper conductor bound. `frac_observed` and `frac_observed_under` are the shares of the
 #'   grid cells within `coverage_m` and `under_line_m` of the segment (not
 #'   past the line's ends) with an observed terrain and canopy value; cells
@@ -510,12 +515,13 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     xy <- sf::st_coordinates(tt)[, 1:2, drop = FALSE]
     ground <- terra::extract(dtm, xy)[, 1]
     nt <- near(xy)
-    reach <- function(zc) sqrt(pmax(nt$dh - phase_offset_m, 0)^2 + (zc - ground)^2)
     h <- tt$Z + growth_m
     beside <- nt$dh > under_line_m
+    rl <- min_reach(xy, ground, profile$z_lo, profile, m, phase_offset_m, h)
+    rh <- min_reach(xy, ground, profile$z_hi, profile, m, phase_offset_m, h)
     trees <- sf::st_sf(
       seg_id = nt$seg_id, height_m = tt$Z, dh_m = nt$dh,
-      reach_lo_m = reach(nt$z_lo), reach_hi_m = reach(nt$z_hi),
+      reach_lo_m = rl$reach, reach_hi_m = rh$reach, dz_lo_m = rl$dz, dz_hi_m = rh$dz,
       geometry = sf::st_geometry(tt)
     )
     trees$strike_lo <- beside & h >= trees$reach_lo_m
@@ -582,8 +588,26 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
 empty_trees <- function(crs) {
   sf::st_sf(seg_id = integer(), height_m = numeric(), dh_m = numeric(),
             reach_lo_m = numeric(), reach_hi_m = numeric(),
+            dz_lo_m = numeric(), dz_hi_m = numeric(),
             strike_lo = logical(), strike_hi = logical(), strike = logical(),
             geometry = sf::st_sfc(crs = crs))
+}
+
+# Minimum 3D distance from each tree base to the conductor, over every
+# profile vertex the tree could reach (#19). Returns the reach and the
+# conductor's height above the base at the vertex that gives it. An unknown
+# upper bound (z = Inf) is never reachable.
+min_reach <- function(xy, ground, z, profile, m, phase_offset_m, h) {
+  step <- stats::median(abs(diff(profile$s_m)), na.rm = TRUE)
+  if (!is.finite(step) || step <= 0) step <- 1
+  k <- min(nrow(profile), ceiling(2 * (max(h, na.rm = TRUE) + phase_offset_m) / step) + 3L)
+  nn <- FNN::get.knnx(as.matrix(profile[, c("x", "y")]), xy, k = k)
+  dh <- pmax(nn$nn.dist * m - phase_offset_m, 0)
+  dz <- matrix(z[nn$nn.index], nrow = nrow(xy)) - ground
+  r <- sqrt(dh^2 + dz^2)
+  r[is.na(r)] <- Inf
+  i <- cbind(seq_len(nrow(xy)), max.col(-r, "first"))
+  list(reach = r[i], dz = dz[i])
 }
 
 #' Line vertices as candidate structure locations

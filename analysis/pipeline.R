@@ -387,7 +387,7 @@ run_case_study <- function(cfg) {
     for (b in c("lo", "hi")) {
       s <- risk$trees[[paste0("strike_", b)]]
       h <- risk$trees[[paste0("wind_hit_", b)]][s]
-      step(sprintf("  %s bound: %d strike trees, %d windward (>= %.0f%% of hours), %.1f expected per fire-weather hour",
+      step(sprintf("  %s bound: %d strike trees, %d windward (>= %.0f%% of hours), wind-weighted count %.1f",
                    b, sum(s), sum(h >= wi$windward_min), 100 * wi$windward_min, sum(h)))
     }
     plot_wind_exposure(risk, rasters, bound = "lo", file = fig("wind_exposure"))

@@ -123,8 +123,10 @@ fire_wind_hours <- function(wind, gust_quantile = 0.95, min_gust_ms = NULL, max_
 #'   hitting arc under each conductor bound; `NA` when it cannot reach),
 #'   `wind_hit_lo`, `wind_hit_hi` (share of fire-weather hours that would
 #'   throw it into the line), and segment columns `wind_strike_lo`,
-#'   `wind_strike_hi` (sum of `wind_hit_*` over strike trees: the expected
-#'   number thrown towards the line in a fire-weather hour),
+#'   `wind_strike_hi` (the wind-weighted strike-tree count: the sum of
+#'   `wind_hit_*` over strike trees, i.e. how many trees the winds of a
+#'   typical fire-weather hour would throw towards the line *if* they fell;
+#'   no failure probability is involved),
 #'   `n_strike_windward_lo`, `n_strike_windward_hi` and
 #'   `n_fire_weather_hours` (so the hour count survives `st_write()`). The
 #'   fire-wind summary is stored in `attr(risk$segments, "wind")`.
@@ -204,14 +206,17 @@ fall_geometry <- function(trees, profile, m, phase_offset_m, growth_m) {
   trees$bearing_deg <- (atan2(-p$offset_m * nx, -p$offset_m * ny) * 180 / pi) %% 360
   d <- pmax(trees$dh_m - phase_offset_m, 0)
   h <- trees$height_m + growth_m
-  arc <- function(reach) {
-    # reach^2 = d^2 + dz^2, so the horizontal reach at conductor height is
-    # R^2 = h^2 - dz^2 = h^2 - reach^2 + d^2.
-    r2 <- h^2 - reach^2 + d^2
+  arc <- function(reach, dz) {
+    # Horizontal reach at conductor height: R^2 = h^2 - dz^2. The tree hits
+    # if it falls within acos(d / R) of straight at the line.
+    r2 <- h^2 - dz^2
     ifelse(is.finite(reach) & h >= reach & r2 > 0, acos(pmin(d / sqrt(pmax(r2, 0)), 1)) * 180 / pi, NA_real_)
   }
-  trees$arc_lo_deg <- arc(trees$reach_lo_m)
-  trees$arc_hi_deg <- arc(trees$reach_hi_m)
+  # dz comes from the vertex that gives the reach (#19); trees built before
+  # that column existed fall back to the nearest-station geometry.
+  dz_of <- function(reach, col) if (!is.null(trees[[col]])) trees[[col]] else sqrt(pmax(reach^2 - d^2, 0))
+  trees$arc_lo_deg <- arc(trees$reach_lo_m, dz_of(trees$reach_lo_m, "dz_lo_m"))
+  trees$arc_hi_deg <- arc(trees$reach_hi_m, dz_of(trees$reach_hi_m, "dz_hi_m"))
   trees
 }
 

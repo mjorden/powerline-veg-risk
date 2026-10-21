@@ -87,8 +87,10 @@ cannot be claimed where the LiDAR did not see the ground.}
 A list: \code{segments} (\code{sf}, one row per segment) and \code{trees} (\code{sf}
 treetops: \code{seg_id}, \code{height_m}, \code{dh_m} horizontal distance to the
 nearest conductor, \code{reach_lo_m} / \code{reach_hi_m} the height a tree there
-needs to reach the conductor under each bound, \code{strike_lo} /
-\code{strike_hi} / \code{strike} whether it does). Columns ending \verb{_lo} / \verb{_hi}
+needs to reach the conductor under each bound (the minimum 3D distance
+to any conductor vertex within reach, less the phase offset),
+\code{dz_lo_m} / \code{dz_hi_m} the conductor's height above the tree's base at
+that vertex, \code{strike_lo} / \code{strike_hi} / \code{strike} whether it does). Columns ending \verb{_lo} / \verb{_hi}
 use the lower / upper conductor bound. \code{frac_observed} and \code{frac_observed_under} are the shares of the
 grid cells within \code{coverage_m} and \code{under_line_m} of the segment (not
 past the line's ends) with an observed terrain and canopy value; cells
