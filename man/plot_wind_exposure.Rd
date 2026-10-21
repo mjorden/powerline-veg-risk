@@ -25,6 +25,8 @@ plot_wind_exposure(
 }
 \description{
 Map of potential strike trees (under one conductor bound) coloured by the
-share of fire-weather hours whose wind would push them into the line, over
-the canopy height model, with a wind rose of those hours.
+share of fire-weather hours whose wind would push them into the line,
+with the windward threshold marked on the key, over a faint canopy
+height backdrop, beside a wind rose of those hours on a square-root
+radius (so a sector with twice the share has twice the area).
 }

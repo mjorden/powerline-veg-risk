@@ -19,15 +19,11 @@ plot_risk_map(
 
 \item{risk}{Output of \code{\link[=assess_risk]{assess_risk()}}.}
 
-\item{structures}{OSM structures (\code{sf}), optional.}
+\item{structures}{OSM structures and line vertices (\code{sf}), optional.}
 
-\item{encroach_limits}{Range of the segment colour scale (m²). The
-lower end is fixed at zero so that no encroachment is always the pale
-end: with a free scale a line with none anywhere was drawn mid-orange
-throughout. An \code{NA} upper end is the largest encroachment on the map,
-but never below 5 m² (the default grow-in threshold), so an
-all-zero map keeps a real range. Set both ends to share one scale
-across maps.}
+\item{encroach_limits}{Range of the encroachment ramp (m^2). The lower
+end is zero; an \code{NA} upper end is the largest value on the map. Set
+both to share one ramp across maps.}
 
 \item{title}{Plot title.}
 
@@ -38,9 +34,11 @@ across maps.}
 \description{
 Segment colour is the canopy area inside the clearance envelope under the
 pessimistic (lower) conductor bound - where to verify first, not a
-finding; line type is the confidence (solid =
-measured conductor or same tier under both bounds, dashed = tier depends
-on the unknown conductor elevation). Segments tiered \code{"no data"} (too
-little of the corridor observed to claim no risk) are drawn grey and
-dotted instead of on the encroachment scale, so they never read as clear.
+finding. Zero is drawn as absence (a thin neutral line), never as the
+pale end of the risk ramp. Line type is the confidence: dashed where the
+tier depends on the unknown conductor elevation, dotted where too little
+of the corridor was observed to claim no risk (\code{"no data"}). Cells the
+LiDAR did not observe are drawn grey and their area is reported, so
+unseen never reads as clear. Strike trees are ink dots (both bounds) or
+paper dots (one bound); supports used for the upper bound are crosses.
 }

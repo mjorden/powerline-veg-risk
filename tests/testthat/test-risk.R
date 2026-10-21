@@ -335,7 +335,11 @@ test_that("'no data' under both bounds gets 'low coverage' and is drawn apart on
   expect_s3_class(p, "ggplot")
   # (no strike trees here, so the shape scale warns about an empty layer)
   built <- suppressWarnings(ggplot2::ggplot_build(p))
-  expect_true("insufficient LiDAR coverage" %in% built$plot$layers[[3]]$data$certain)
+  drawn <- unlist(lapply(built$plot$layers, function(l) {
+    d <- l$data
+    if (is.data.frame(d) && "certain" %in% names(d)) as.character(d$certain) else character()
+  }))
+  expect_true("insufficient LiDAR coverage" %in% drawn)
 })
 
 test_that("the midmod risk map dots 'no data' segments and ignores voids off the corridor", {
@@ -364,18 +368,23 @@ test_that("the midmod risk map dots 'no data' segments and ignores voids off the
   expect_true(all(built$data[[i]]$linetype == "11"))
 })
 
-test_that("no encroachment anywhere is drawn at the pale end of the scale (#5)", {
+test_that("no encroachment anywhere is drawn as absence, never on the risk ramp (#5)", {
   skip_if_not_installed("ggplot2")
   skip_if_not_installed("scales")
+  pal <- vegrisk_palette()
   r <- make_rasters(data.frame(x = x0 + 150.5, y = y0 + 40.5, h = 4)) # nothing under the line
   rk <- risk_for(r, tree_ws_m = 3)
   expect_true(all(rk$segments$encroach_lo_m2 == 0))
-  # Before the fix a free scale rescaled c(0, 0) to 0.5: mid-orange for zero.
+  # Before the fix a free scale rescaled c(0, 0) to 0.5: mid-ramp for zero.
   built <- suppressWarnings(ggplot2::ggplot_build(plot_risk_map(r, rk)))
-  seg_layer <- built$data[[2]]
-  expect_true(all(toupper(seg_layer$colour) == "#FEE8C8"))
-  # A shared scale can be imposed from outside.
-  built2 <- suppressWarnings(ggplot2::ggplot_build(plot_risk_map(r, rk, encroach_limits = c(0, 100))))
+  cols <- unlist(lapply(built$data, `[[`, "colour"))
+  expect_false(any(cols %in% pal$encroach))
+  expect_true(any(vapply(built$data, function(d) nrow(d) == 2 && all(d$colour %in% pal$line), logical(1))))
+  # With encroachment present, a shared upper limit can be imposed from outside.
+  grow <- make_rasters(data.frame(x = x0 + 25.5, y = y0 + 0.5, h = 9))
+  rk2 <- risk_for(grow, tree_ws_m = 3)
+  expect_gt(max(rk2$segments$encroach_lo_m2), 0)
+  built2 <- suppressWarnings(ggplot2::ggplot_build(plot_risk_map(grow, rk2, encroach_limits = c(0, 100))))
   expect_equal(built2$plot$scales$get_scales("colour")$limits, c(0, 100))
 })
 
