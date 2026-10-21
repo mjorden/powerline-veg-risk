@@ -15,7 +15,9 @@ osm_power_structures(
 \item{overpass_url}{Overpass endpoint.}
 }
 \value{
-An \code{sf} POINT data frame (EPSG:4326) with \code{osm_id} and \code{type}.
+An \code{sf} POINT data frame (EPSG:4326) with \code{osm_id} and \code{type};
+zero rows when the area has none (sf gives an empty geometry column
+the class \code{sfc_GEOMETRY}, so test \code{nrow()}, not the class).
 }
 \description{
 Fetch power-line support structures (poles, towers) from OpenStreetMap

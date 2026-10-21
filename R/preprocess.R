@@ -59,6 +59,7 @@ read_corridor <- function(files, lines, half_width_m = 40) {
 
   if (!any(las$Classification == 2L)) {
     message("No ground class delivered; running cloth simulation filter.")
+    rlang::check_installed("RCSF", reason = "to classify ground with the cloth simulation filter")
     las <- lidR::classify_ground(las, lidR::csf(sloop_smooth = TRUE))
   }
   lidR::normalize_height(las, lidR::tin())

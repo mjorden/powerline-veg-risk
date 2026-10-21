@@ -3,6 +3,19 @@
 
 tnm_api <- "https://tnmaccess.nationalmap.gov/api/v1/products"
 
+# One request builder for every service the package talks to: a project
+# user agent, a timeout (an unattended run must not hang on a stalled
+# socket), and retries on the transient failures these services actually
+# return (Overpass answers 504 on overload; httr2's default retries only 429
+# and 503) and on connection errors.
+vegrisk_request <- function(url, timeout_s = 60, max_tries = 4) {
+  httr2::request(url) |>
+    httr2::req_user_agent(vegrisk_ua) |>
+    httr2::req_timeout(timeout_s) |>
+    httr2::req_retry(max_tries = max_tries, retry_on_failure = TRUE,
+                     is_transient = function(resp) httr2::resp_status(resp) %in% c(429L, 502L, 503L, 504L))
+}
+
 #' Find USGS 3DEP LiDAR point-cloud tiles intersecting an area of interest
 #'
 #' Queries The National Map (TNM) Access API for "Lidar Point Cloud (LPC)"
@@ -14,20 +27,21 @@ tnm_api <- "https://tnmaccess.nationalmap.gov/api/v1/products"
 #'   mixing years in one model mixes vegetation states).
 #' @param max_items Page size for the API.
 #' @return An `sf` data frame of tiles (EPSG:4326 footprints) with columns
-#'   `title`, `url`, `size_mb`, `pub_date`.
+#'   `title`, `url`, `size_mb`, `size_bytes`, `pub_date`. Aborts, naming the
+#'   acquisitions that were found, when `project` matches none of them: a
+#'   typo must not come back as an empty table.
 #' @export
 tnm_lidar_tiles <- function(aoi, project = NULL, max_items = 100) {
   bb <- sf::st_bbox(sf::st_transform(sf::st_as_sfc(sf::st_bbox(aoi)), 4326))
   offset <- 0
   items <- list()
   repeat {
-    resp <- httr2::request(tnm_api) |>
+    resp <- vegrisk_request(tnm_api) |>
       httr2::req_url_query(
         datasets = "Lidar Point Cloud (LPC)",
         bbox = paste(bb[c("xmin", "ymin", "xmax", "ymax")], collapse = ","),
         max = max_items, offset = offset, outputFormat = "JSON"
       ) |>
-      httr2::req_retry(max_tries = 4) |>
       httr2::req_perform() |>
       httr2::resp_body_json()
     items <- c(items, resp$items)
@@ -42,6 +56,7 @@ tnm_lidar_tiles <- function(aoi, project = NULL, max_items = 100) {
     title    = vapply(items, `[[`, "", "title"),
     url      = vapply(items, `[[`, "", "downloadURL"),
     size_mb  = vapply(items, function(i) i$sizeInBytes / 1e6, 0),
+    size_bytes = vapply(items, function(i) as.numeric(i$sizeInBytes %||% NA), 0),
     pub_date = as.Date(vapply(items, function(i) i$publicationDate %||% NA_character_, "")),
     geometry = sf::st_sfc(lapply(items, function(i) {
       b <- i$boundingBox
@@ -52,27 +67,59 @@ tnm_lidar_tiles <- function(aoi, project = NULL, max_items = 100) {
     }), crs = 4326)
   )
   tiles <- sf::st_as_sf(tiles)
-  if (!is.null(project)) tiles <- tiles[grepl(project, tiles$title), ]
-  tiles
+  filter_tiles(tiles, project)
+}
+
+# Keep the tiles whose title matches `project`; abort, naming what was
+# there, rather than hand back an empty table.
+filter_tiles <- function(tiles, project) {
+  if (is.null(project)) return(tiles)
+  keep <- grepl(project, tiles$title)
+  if (!any(keep)) {
+    found <- unique(sub("^USGS Lidar Point Cloud ", "", sub(" [^ ]*$", "", tiles$title)))
+    rlang::abort(c(sprintf("`project` \"%s\" matches none of the %d tiles found for this AOI.", project, nrow(tiles)),
+                   i = paste("Acquisitions found:", paste(found, collapse = ", "))))
+  }
+  tiles[keep, ]
 }
 
 #' Download LiDAR tiles, skipping files already present
 #'
+#' Each tile is downloaded to a `.part` file and renamed only once it is
+#' complete, so an interrupted download is retried on the next run instead
+#' of being accepted as a tile. Where TNM reported the size, the file is
+#' checked against it, before and after the download.
+#'
 #' @param tiles Output of [tnm_lidar_tiles()].
 #' @param dest_dir Directory for the `.laz` files.
+#' @param timeout_s Timeout per tile download.
 #' @return Character vector of local file paths.
 #' @export
-download_tiles <- function(tiles, dest_dir = "data-raw/laz") {
+download_tiles <- function(tiles, dest_dir = "data-raw/laz", timeout_s = 3600) {
   dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
   paths <- file.path(dest_dir, basename(tiles$url))
+  sizes <- tiles$size_bytes %||% rep(NA_real_, nrow(tiles))
   for (i in seq_along(paths)) {
-    if (file.exists(paths[i]) && file.size(paths[i]) > 0) next
+    if (tile_complete(paths[i], sizes[i])) next
     message("Downloading ", basename(paths[i]), sprintf(" (%.0f MB)", tiles$size_mb[i]))
-    httr2::request(tiles$url[i]) |>
-      httr2::req_retry(max_tries = 3) |>
-      httr2::req_perform(path = paths[i])
+    part <- paste0(paths[i], ".part")
+    vegrisk_request(tiles$url[i], timeout_s = timeout_s, max_tries = 3) |>
+      httr2::req_perform(path = part)
+    if (!tile_complete(part, sizes[i])) {
+      rlang::abort(sprintf("Download of %s is incomplete (%.0f of %.0f bytes); the .part file is kept for inspection.",
+                           basename(paths[i]), file.size(part), sizes[i]))
+    }
+    file.rename(part, paths[i])
   }
   paths
+}
+
+# A tile on disk counts as complete when it exists, is not empty, and (when
+# TNM gave a size) is exactly that size.
+tile_complete <- function(path, size_bytes = NA) {
+  if (!file.exists(path) || file.size(path) == 0) return(FALSE)
+  if (is.na(size_bytes)) return(TRUE)
+  file.size(path) == size_bytes
 }
 
 #' Fetch overhead power lines from OpenStreetMap
@@ -86,7 +133,10 @@ download_tiles <- function(tiles, dest_dir = "data-raw/laz") {
 #'   `cable` is deliberately left out. Ignored when `ids` is given.
 #' @param overpass_url Overpass endpoint.
 #' @return An `sf` LINESTRING data frame (EPSG:4326) with `osm_id`, `name`,
-#'   `power`, `voltage_kv`, `operator`.
+#'   `power`, `voltage_kv`, `operator`. Attributes `osm_timestamp` (the
+#'   OSM data snapshot the answer came from) and `osm_query` record the
+#'   provenance; [osm_power_structures()] and [osm_buildings()] carry the
+#'   same two.
 #' @export
 osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_line"),
                             overpass_url = "https://overpass-api.de/api/interpreter") {
@@ -106,7 +156,7 @@ osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_lin
     if (all(is.na(v))) NA_real_ else max(v, na.rm = TRUE) / 1000
   }, 0)
 
-  sf::st_sf(
+  out <- sf::st_sf(
     osm_id     = vapply(els, function(e) as.character(e$id), ""),
     name       = vapply(els, tag, "", "name"),
     power      = vapply(els, tag, "", "power"),
@@ -116,27 +166,31 @@ osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_lin
       sf::st_linestring(do.call(rbind, lapply(e$geometry, function(p) c(p$lon, p$lat))))
     }), crs = 4326)
   )
+  osm_provenance(out, els)
 }
 
 #' Fetch power-line support structures (poles, towers) from OpenStreetMap
 #'
 #' @inheritParams osm_power_lines
-#' @return An `sf` POINT data frame (EPSG:4326) with `osm_id` and `type`.
+#' @return An `sf` POINT data frame (EPSG:4326) with `osm_id` and `type`;
+#'   zero rows when the area has none (sf gives an empty geometry column
+#'   the class `sfc_GEOMETRY`, so test `nrow()`, not the class).
 #' @export
 osm_power_structures <- function(aoi, overpass_url = "https://overpass-api.de/api/interpreter") {
   bb <- osm_bbox(aoi)
   els <- overpass(sprintf(
     '[out:json][timeout:90];(node["power"="tower"](%s);node["power"="pole"](%s););out;', bb, bb
   ), overpass_url)
-  if (length(els) == 0) {
-    return(sf::st_sf(osm_id = character(), type = character(),
-                     geometry = sf::st_sfc(crs = 4326)))
+  out <- if (length(els) == 0) {
+    sf::st_sf(osm_id = character(), type = character(), geometry = empty_sfc("POINT"))
+  } else {
+    sf::st_sf(
+      osm_id   = vapply(els, function(e) as.character(e$id), ""),
+      type     = vapply(els, function(e) e$tags$power %||% NA_character_, ""),
+      geometry = sf::st_sfc(lapply(els, function(e) sf::st_point(c(e$lon, e$lat))), crs = 4326)
+    )
   }
-  sf::st_sf(
-    osm_id   = vapply(els, function(e) as.character(e$id), ""),
-    type     = vapply(els, function(e) e$tags$power %||% NA_character_, ""),
-    geometry = sf::st_sfc(lapply(els, function(e) sf::st_point(c(e$lon, e$lat))), crs = 4326)
-  )
+  osm_provenance(out, els)
 }
 
 #' Fetch building footprints from OpenStreetMap
@@ -145,7 +199,9 @@ osm_power_structures <- function(aoi, overpass_url = "https://overpass-api.de/ap
 #' are skipped.
 #'
 #' @inheritParams osm_power_lines
-#' @return An `sf` POLYGON data frame (EPSG:4326) with `osm_id`.
+#' @return An `sf` POLYGON data frame (EPSG:4326) with `osm_id`; zero rows
+#'   when the area has none (an empty geometry column is `sfc_GEOMETRY`;
+#'   test `nrow()`, not the class).
 #' @export
 osm_buildings <- function(aoi, overpass_url = "https://overpass-api.de/api/interpreter") {
   els <- overpass(sprintf('[out:json][timeout:90];way["building"](%s);out geom;', osm_bbox(aoi)),
@@ -154,12 +210,32 @@ osm_buildings <- function(aoi, overpass_url = "https://overpass-api.de/api/inter
     g <- e$geometry
     length(g) >= 4 && g[[1]]$lon == g[[length(g)]]$lon && g[[1]]$lat == g[[length(g)]]$lat
   }, els)
-  sf::st_sf(
-    osm_id   = vapply(closed, function(e) as.character(e$id), character(1)),
-    geometry = sf::st_sfc(lapply(closed, function(e) {
-      sf::st_polygon(list(do.call(rbind, lapply(e$geometry, function(p) c(p$lon, p$lat)))))
-    }), crs = 4326)
-  )
+  out <- if (length(closed) == 0) {
+    sf::st_sf(osm_id = character(), geometry = empty_sfc("POLYGON"))
+  } else {
+    sf::st_sf(
+      osm_id   = vapply(closed, function(e) as.character(e$id), character(1)),
+      geometry = sf::st_sfc(lapply(closed, function(e) {
+        sf::st_polygon(list(do.call(rbind, lapply(e$geometry, function(p) c(p$lon, p$lat)))))
+      }), crs = 4326)
+    )
+  }
+  osm_provenance(out, els)
+}
+
+# A zero-length EPSG:4326 geometry column for an empty answer. sf gives
+# every zero-feature column the class sfc_GEOMETRY (st_cast and subsetting
+# can't type it), so the documented type holds for one or more features and
+# an empty layer must be recognised by nrow() == 0, not by its class.
+empty_sfc <- function(type = c("POINT", "POLYGON", "LINESTRING")) {
+  match.arg(type)
+  sf::st_sfc(crs = 4326)
+}
+
+osm_provenance <- function(out, els) {
+  attr(out, "osm_timestamp") <- attr(els, "osm_timestamp")
+  attr(out, "osm_query") <- attr(els, "osm_query")
+  out
 }
 
 # Overpass way selector for one or more power=* values inside the AOI.
@@ -179,11 +255,24 @@ osm_bbox <- function(aoi) {
 }
 
 overpass <- function(query, overpass_url) {
-  httr2::request(overpass_url) |>
-    httr2::req_user_agent("vegrisk R package (github.com/mjorden/powerline-veg-risk)") |>
+  body <- vegrisk_request(overpass_url, timeout_s = 120) |>
     httr2::req_body_form(data = query) |>
-    httr2::req_retry(max_tries = 4) |>
     httr2::req_perform() |>
-    httr2::resp_body_json() |>
-    _$elements
+    httr2::resp_body_json()
+  overpass_elements(body, query)
+}
+
+# Overpass reports a server-side timeout or memory abort as HTTP 200 with a
+# `remark` and an empty or truncated `elements`. That must not pass as an
+# empty area, so it aborts here. The OSM snapshot time travels with the
+# elements as an attribute.
+overpass_elements <- function(body, query = NULL) {
+  if (!is.null(body$remark)) {
+    rlang::abort(c("Overpass did not complete the query.", x = body$remark,
+                   i = "Try again later, or a smaller area; the result was not cached."))
+  }
+  els <- body$elements %||% list()
+  attr(els, "osm_timestamp") <- body$osm3s$timestamp_osm_base %||% NA_character_
+  attr(els, "osm_query") <- query
+  els
 }

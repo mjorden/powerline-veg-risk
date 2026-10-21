@@ -4,16 +4,21 @@
 \alias{download_tiles}
 \title{Download LiDAR tiles, skipping files already present}
 \usage{
-download_tiles(tiles, dest_dir = "data-raw/laz")
+download_tiles(tiles, dest_dir = "data-raw/laz", timeout_s = 3600)
 }
 \arguments{
 \item{tiles}{Output of \code{\link[=tnm_lidar_tiles]{tnm_lidar_tiles()}}.}
 
 \item{dest_dir}{Directory for the \code{.laz} files.}
+
+\item{timeout_s}{Timeout per tile download.}
 }
 \value{
 Character vector of local file paths.
 }
 \description{
-Download LiDAR tiles, skipping files already present
+Each tile is downloaded to a \code{.part} file and renamed only once it is
+complete, so an interrupted download is retried on the next run instead
+of being accepted as a tile. Where TNM reported the size, the file is
+checked against it, before and after the download.
 }

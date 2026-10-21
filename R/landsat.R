@@ -62,10 +62,8 @@ landsat_scenes <- function(aoi, years, months = 7:9, max_cloud = 50,
 stac_search <- function(url, body) {
   out <- list()
   repeat {
-    resp <- httr2::request(url) |>
-      httr2::req_user_agent("vegrisk R package (github.com/mjorden/powerline-veg-risk)") |>
+    resp <- vegrisk_request(url) |>
       httr2::req_body_json(body) |>
-      httr2::req_retry(max_tries = 4) |>
       httr2::req_perform() |>
       httr2::resp_body_json()
     out <- c(out, resp$features)
@@ -105,8 +103,7 @@ month_days <- function(year, month) {
 pc_sign <- function(href, collection = "landsat-c2-l2") {
   tok <- pc_env[[collection]]
   if (is.null(tok) || Sys.time() > tok$expiry - 300) {
-    resp <- httr2::request(paste0(pc_sas, "/", collection)) |>
-      httr2::req_retry(max_tries = 4) |>
+    resp <- vegrisk_request(paste0(pc_sas, "/", collection)) |>
       httr2::req_perform() |>
       httr2::resp_body_json()
     expiry <- as.POSIXct(resp$`msft:expiry`, format = "%Y-%m-%dT%H:%M:%OS", tz = "UTC")

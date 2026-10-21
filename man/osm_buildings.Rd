@@ -12,7 +12,9 @@ osm_buildings(aoi, overpass_url = "https://overpass-api.de/api/interpreter")
 \item{overpass_url}{Overpass endpoint.}
 }
 \value{
-An \code{sf} POLYGON data frame (EPSG:4326) with \code{osm_id}.
+An \code{sf} POLYGON data frame (EPSG:4326) with \code{osm_id}; zero rows
+when the area has none (an empty geometry column is \code{sfc_GEOMETRY};
+test \code{nrow()}, not the class).
 }
 \description{
 Only closed ways are returned; multipolygon relations (rare for houses)

@@ -26,7 +26,10 @@ would otherwise be taught to the classifier as vegetation. Underground
 }
 \value{
 An \code{sf} LINESTRING data frame (EPSG:4326) with \code{osm_id}, \code{name},
-\code{power}, \code{voltage_kv}, \code{operator}.
+\code{power}, \code{voltage_kv}, \code{operator}. Attributes \code{osm_timestamp} (the
+OSM data snapshot the answer came from) and \code{osm_query} record the
+provenance; \code{\link[=osm_power_structures]{osm_power_structures()}} and \code{\link[=osm_buildings]{osm_buildings()}} carry the
+same two.
 }
 \description{
 Fetch overhead power lines from OpenStreetMap
