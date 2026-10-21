@@ -20,7 +20,7 @@
 | LiDAR | `CO_DRCOG_2020`, UTM metres, ~35 pts/m² | `TN_DavidsonCounty_D22`, Tennessee State Plane **US survey feet**, ~34 pts/m² |
 | Delivered classes | ground / unclassified / noise only | + vegetation (3–5) and buildings (6) |
 | Line length, above-ground points | 1.52 km, 2.26 M | 2.0 km, 1.05 M |
-| Conductor returns found | 914 | 104,650 |
+| Conductor returns found | 914 | 104,181 |
 | Conductor elevation measured along | 2% of the line | **~100%** of the line |
 | Result | Bounded: 3 robust grow-in candidates, 27 segments undecidable | Decisive: no grow-in, 24 strike trees in 7 segments, 32 clear |
 
@@ -28,8 +28,8 @@
 
 1. **No public 3DEP project from 2019 on labels power lines.** I sampled the classification of all 641 USGS 3DEP projects from 2019 onward in the public Entwine index. None uses the ASPRS wire classes; the few hits for codes 13/14 were topobathy datasets or state-specific reuse (NC Phase 4 uses 13 for roads). Conductor labels have to be derived.
 2. **Whether public LiDAR can decide grow-in depends on whether it sampled the conductors.** In Colorado it barely did, so the conductor is bounded within a band tens of metres tall and 27 of 30 segments stay undecidable. In Nashville, the 500 kV bundles were sampled along almost the whole line, so the same pipeline gives a measured, decisive screen.
-3. **Vendor vegetation classes contain the conductors.** In Nashville, 99.3% of conductor returns (103,918 points, 15–45 m up) are delivered as *high vegetation*. A canopy model built straight from the delivered classes flags **every one** of the 39 segments as grow-in; with conductor returns removed, none are.
-4. **Random cross-validation on point clouds misleads.** Random folds report a Colorado wire average precision of 0.22; 100 m spatial blocks report 0.004. A model trained in Colorado doesn't transfer to Nashville (wire recall 0).
+3. **Vendor vegetation classes contain the conductors.** In Nashville, 99.3% of conductor returns (103,449 points, 15–45 m up) are delivered as *high vegetation*. A canopy model built straight from the delivered classes flags **every one** of the 39 segments as grow-in; with conductor returns removed, none are.
+4. **Random cross-validation on point clouds misleads.** Random folds report a Colorado wire average precision of 0.21; 100 m spatial blocks report 0.003. A model trained in Colorado doesn't transfer to Nashville (wire recall 0).
 
 ![Nashville risk map](man/figures/nashville_risk_map.png)
 
@@ -143,24 +143,24 @@ Each segment reports `frac_observed` (across the corridor) and `frac_observed_un
 
 | class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
 |---|---:|---:|---:|---:|---:|
-| building | 3,608 | 0.0016 | 0.36 | 0.85 | 0.51 |
-| structure | 1,602 | 0.0007 | 0.012 | 0.41 | 0.011 |
-| wire | 914 | 0.0004 | 0.004 | 0.22 | 0.005 |
+| building | 3,608 | 0.0016 | 0.45 | 0.82 | 0.55 |
+| structure | 1,602 | 0.0007 | 0.011 | 0.41 | 0.008 |
+| wire | 914 | 0.0004 | 0.003 | 0.21 | 0.004 |
 
 With only a few hundred metres of labelled conductor and five structures, wires and structures don't generalise across space here. Random folds would have hidden that.
 
 ![Sunshine cross-section](man/figures/sunshine_cross_section.png)
 
-**The grown-in canopy is not the dry canopy.** A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, gives 142 canopy-dominated 30 m pixels in the corridor. 23 of the 30 segments have enough grown-in canopy to rank; NDVI and NDMI agree closely across them (r = 0.89).
+**The grown-in canopy is not the dry canopy.** A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, covers the corridor with 266 pixels. Only 63 are scored: 99 are under half canopy, and 104, mostly along the corridor edge and inside the bend, are less than 80% observed by the LiDAR, so their reflectance would describe land outside the clip. 15 of the 30 segments rest on at least two scored pixels and 5 m² of grown-in canopy and get a percentile; the others keep their index but aren't ranked. NDVI and NDMI agree closely across the ranked segments (r = 0.87).
 
-| robust grow-in candidate | NDVI percentile | NDMI percentile |
-|---|---:|---:|
-| 0.10–0.15 km, trees to 20 m | 0.37 | 0.49 |
-| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 0.50 | 0.80 |
-| 1.06–1.11 km, canyon floor, trees to 29 m | 0.89 | 0.96 |
+| robust grow-in candidate | scored pixels | NDVI percentile | NDMI percentile |
+|---|---:|---:|---:|
+| 0.10–0.15 km, trees to 20 m | 3 | 0.76 | 0.68 |
+| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 1 | not ranked | not ranked |
+| 1.06–1.11 km, canyon floor, trees to 29 m | 3 | 0.90 | 0.95 |
 
-- **None of the 3 robust grow-in candidates is dry.** The two worst encroachments are among the wettest canopy on the line: riparian trees on the canyon floor.
-- **The 5 driest segments** (lowest NDVI quarter; 0.05–0.10, 0.46–0.51, 0.81–0.86 and 1.32–1.42 km) are all bound-dependent: grow-in only if the conductor is at the code minimum. If the conductor turns out to be low there, encroachment and dry fuel coincide, so these come first among the 27 undecidable segments.
+- **Neither ranked grow-in candidate is dry;** both sit in the greener half of the corridor, and the 1.06–1.11 km segment is among the wettest canopy on the line (riparian trees on the canyon floor). The top candidate at 1.01–1.06 km can't be ranked: its riparian strip fills only one scored pixel, and one mixed 30 m pixel can't carry a percentile.
+- **The 2 driest segments** (lowest NDVI quarter: 0.05–0.10 and 0.46–0.51 km) are both bound-dependent: grow-in only if the conductor is at the code minimum. If the conductor turns out to be low there, encroachment and dry fuel coincide, so these come first among the 27 undecidable segments.
 
 ![Sunshine canopy dryness](man/figures/sunshine_canopy_dryness.png)
 
@@ -173,7 +173,7 @@ With only a few hundred metres of labelled conductor and five structures, wires 
 
 - **The split is close to all-or-nothing.** Windward trees are hit in 95% of fire-weather hours on average; the median leeward tree is hit in 1%.
 - **Under the optimistic bound, the top grow-in candidate also has the most windward strike trees:** 7 of its 13, at 1.01–1.06 km. It is the segment to verify first on both counts.
-- **The dry segment at 1.32–1.37 km** (lowest NDVI on the line) has 9 strike trees under the pessimistic bound, all windward.
+- **The two dry segments** (0.05–0.10 and 0.46–0.51 km) have 14 and 8 potential strike trees under the pessimistic bound, of which 4 and 2 are windward.
 
 ![Sunshine wind exposure](man/figures/sunshine_wind_exposure.png)
 
@@ -181,41 +181,41 @@ With only a few hundred metres of labelled conductor and five structures, wires 
 
 ![Nashville conductor profile](man/figures/nashville_conductor_profile.png)
 
-**The conductor is measured along the whole line.** The 500 kV bundles were well sampled: 104,650 conductor returns, three phases at about −12, 0 and +12 m, and a second circuit sharing the right-of-way at +30–45 m. The profile shows clean catenaries between towers, about 15–45 m above the ground (median 24 m).
+**The conductor is measured along the whole line.** The 500 kV bundles were well sampled: 104,181 conductor returns, three phases at about −12, 0 and +12 m, and a second circuit sharing the right-of-way at +30–45 m. The profile shows clean catenaries between towers, about 15–45 m above the ground (median 24 m).
 
 **Classifier against weak labels (spatial blocks):**
 
 | class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
 |---|---:|---:|---:|---:|---:|
-| wire | 104,650 | 0.10 | **0.88** | 0.94 | 0.83 |
+| wire | 104,181 | 0.10 | **0.89** | 0.95 | 0.83 |
 | structure | 4,262 | 0.004 | 0.03 | 0.26 | 0.02 |
 
 ![Nashville cross-validation](man/figures/nashville_cv_metrics.png)
 
-Wires transfer across space here: average precision 0.88 against a no-skill 0.10, and 0.83 even without the height and echo features that encode the labelling rule. Structures (31 lattice towers) still don't.
+Wires transfer across space here: average precision 0.89 against a no-skill 0.10, and 0.83 even without the height and echo features that encode the labelling rule. Structures (31 lattice towers) still don't.
 
 **Against the vendor's classes.** These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can't show skill: predicting "vegetation" everywhere scores 0.992.
 
 | | vegetation F1 | building F1 | balanced accuracy | Cohen's κ |
 |---|---:|---:|---:|---:|
 | always "vegetation" (baseline) | 0.992 | 0 | 0.50 | 0 |
-| weak labels | 0.950 | 0 | 0.46 | −0.01 |
+| weak labels | 0.950 | 0 | 0.46 | 0.07 |
 | model trained on weak labels | 0.957 | 0 | 0.47 | −0.01 |
 | Colorado model, transferred | 0.992 | 0 | 0.50 | 0.00 |
-| **trained on vendor labels (spatial CV)** | 0.998 | **0.88** (AP 0.95) | 0.89 | — |
+| **trained on vendor labels (spatial CV)** | 0.998 | **0.87** (AP 0.95) | 0.89 | — |
 
-- **On vegetation vs building, the weak-label pipeline has no skill at this site.** OSM maps one building in the corridor, so there are no building labels to learn from. The vendor's labels would buy a building F1 of 0.88. The weak models' lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.
-- **The Colorado model doesn't transfer.** With its own class prior it recalls 0% of Nashville's conductor returns. Threshold-free, its wire average precision is 0.22 against a 0.10 baseline (the Nashville model: 0.87). Its 0.992 vegetation F1 is exactly the baseline.
+- **On vegetation vs building, the weak-label pipeline has no skill at this site.** OSM maps one building in the corridor, so there are no building labels to learn from. The vendor's labels would buy a building F1 of 0.87. The weak models' lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.
+- **The Colorado model doesn't transfer.** With its own class prior it recalls 0% of Nashville's conductor returns. Threshold-free, its wire average precision is 0.23 against a 0.10 baseline (the Nashville model: 0.86). Its 0.992 vegetation F1 is exactly the baseline.
 
 **Risk screen.** The same segments, with three different canopy models:
 
 | canopy model | grow-in | fall-in | clear |
 |---|---:|---:|---:|
 | vendor vegetation classes, as delivered | 39 | 0 | 0 |
-| vendor vegetation + this package's conductor removal | 0 | 10 | 29 |
+| vendor vegetation + this package's conductor removal | 0 | 9 | 30 |
 | **this package** (consensus vegetation + conductor removal) | **0** | **7** | **32** |
 
-- **The delivered classes would send crews to every span.** Removing conductor returns is the whole grow-in correction (39 → 0). Consensus labelling (model and weak rules agreeing on vegetation, vendor buildings removed) then trims fall-in from 10 segments to 7.
+- **The delivered classes would send crews to every span.** Removing conductor returns is the whole grow-in correction (39 → 0). Consensus labelling (model and weak rules agreeing on vegetation, vendor buildings removed) then trims fall-in from 9 segments to 7.
 - **No grow-in.** The managed right-of-way is clear under the conductors.
 - **The 32 clear segments were seen, not assumed.** Every segment has at least 91% of its corridor and of its grow-in zone observed (median 99%), so none is tiered `no data`. The lowest segment (0.36–0.41 km, 91% under the line) is still 16 points above the 75% threshold.
 - **24 strike trees across 7 segments,** 28–39 m from the centreline, the same under both bounds because the conductor is measured. They are the list to verify.
