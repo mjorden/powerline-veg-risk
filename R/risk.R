@@ -88,7 +88,7 @@ segment_lines <- function(lines, crs, seg_m = 50) {
 #'
 #' @param las Height-normalised `LAS` from [read_corridor()].
 #' @param pred Output of [predict_points()] (with the weak `label` column and
-#'   the `linearity_k10` feature).
+#'   the linearity feature named by `linearity`).
 #' @param res_m Raster resolution in metres.
 #' @param profile Optional output of [conductor_profile()].
 #' @param envelope_m Half-width of the conductor envelope (metres).
@@ -96,6 +96,10 @@ segment_lines <- function(lines, crs, seg_m = 50) {
 #'   conductor returns (sag between bins, bundle spacing).
 #' @param min_linearity Linearity needed for an envelope point to count as a
 #'   conductor return.
+#' @param linearity Name of the linearity column in `pred` used for that
+#'   test. By default the smallest neighbourhood [point_features()] recorded
+#'   on `pred` (`linearity_k10` for the default `k`); an absent column is an
+#'   error, never silently "not linear".
 #' @param gap_m Empty space beneath a candidate cluster for it to count as
 #'   suspended.
 #' @param drop Optional logical vector over `pred` rows of points to keep out
@@ -112,7 +116,8 @@ segment_lines <- function(lines, crs, seg_m = 50) {
 #' @export
 corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 15,
                              below_m = 1, min_linearity = 0.6, gap_m = 1.5, drop = NULL,
-                             void_m = 5) {
+                             void_m = 5, linearity = NULL) {
+  pred <- as_point_table(pred, "pred")
   m <- las_m_per_unit(las)
   res <- res_m / m
   dtm <- lidR::rasterize_terrain(lidR::unnormalize_height(las), res, lidR::tin())
@@ -128,7 +133,12 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
     zabs <- las$Zref[pred$pid[cand]] * m
     meas <- profile$src[pr$vertex] == "measured"
     near <- meas & pr$dist_m <= envelope_m & zabs >= profile$z_lo[pr$vertex] - below_m
-    linear <- if (!is.null(pred$linearity_k10)) pred$linearity_k10[cand] >= min_linearity else FALSE
+    if (is.null(linearity)) linearity <- paste0("linearity_k", min(attr(pred, "k") %||% 10L))
+    if (!linearity %in% names(pred)) {
+      rlang::abort(sprintf("`pred` has no `%s` column; pass `linearity` to name the linearity feature.",
+                           linearity))
+    }
+    linear <- pred[[linearity]][cand] >= min_linearity
     # Local air gap beneath the conductor band: a candidate cell is
     # suspended if no return of any kind lies in the `gap_m` layer just below
     # the band (conductor - below_m) anywhere in its 3 x 3 neighbourhood.
@@ -224,14 +234,16 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
 #'   adjacent measured bins.
 #' @param max_gap_m Largest gap between measured bins that is interpolated.
 #' @param min_ground_clear_m,attach_m,max_span_m Bounds parameters, metres.
-#' @return data.frame of vertices: `line_id`, `x`, `y`, `s_m`, `seg_id`,
-#'   `ground`, `z_lo`, `z_hi`, `src`.
+#' @return data.frame of vertices: `line_id`, `x`, `y`, `tx`, `ty` (unit
+#'   tangent along the line), `s_m`, `seg_id`, `ground`, `z_lo`, `z_hi`,
+#'   `src`.
 #' @export
 conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
                               search_m = 15, min_p_wire = 0.9, structure_mask_m = 8,
                               bin_m = 5, min_bin_points = 3, q = 0.25, max_slope = 0.2,
                               max_gap_m = 30, min_ground_clear_m = 4.9, attach_m = 20,
                               max_span_m = 500) {
+  pred <- as_point_table(pred, "pred")
   crs <- sf::st_crs(segments)
   m <- crs_m_per_unit(crs)
   v <- line_vertex_table(segments, crs, step_m)
@@ -408,8 +420,11 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   would otherwise be `"none"`, is tiered `"no data"`: absence of risk
 #'   cannot be claimed where the LiDAR did not see the ground.
 #' @return A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
-#'   treetops). Columns ending `_lo` / `_hi` use the lower / upper conductor
-#'   bound. `frac_observed` and `frac_observed_under` are the shares of the
+#'   treetops: `seg_id`, `height_m`, `dh_m` horizontal distance to the
+#'   nearest conductor, `reach_lo_m` / `reach_hi_m` the height a tree there
+#'   needs to reach the conductor under each bound, `strike_lo` /
+#'   `strike_hi` / `strike` whether it does). Columns ending `_lo` / `_hi`
+#'   use the lower / upper conductor bound. `frac_observed` and `frac_observed_under` are the shares of the
 #'   grid cells within `coverage_m` and `under_line_m` of the segment (not
 #'   past the line's ends) with an observed terrain and canopy value; cells
 #'   off the edge of the data count as unobserved, structure-masked cells as

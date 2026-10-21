@@ -218,3 +218,32 @@ test_that("too few canopy pixels in the corridor leaves percentiles undefined", 
   expect_true(all(is.na(d$segments$ndvi_pct)))
   expect_true(all(!is.na(d$segments$ndvi)))
 })
+
+test_that("landsat_composite logs every scene, with no-coverage apart from read errors (#30)", {
+  scenes <- tibble::tibble(id = c("A", "B", "C", "D"),
+                           datetime = as.POSIXct("2020-08-01", tz = "UTC") + 86400 * 0:3,
+                           platform = "landsat-8", cloud_cover = 5,
+                           red = "r", nir = "n", swir1 = "s", qa = "q")
+  tile <- function(v) {
+    r <- terra::rast(xmin = x0, xmax = x0 + 90, ymin = y0, ymax = y0 + 90, resolution = 30,
+                     crs = "EPSG:26913", nlyrs = 2, vals = v)
+    names(r) <- c("ndvi", "ndmi")
+    r
+  }
+  testthat::local_mocked_bindings(read_landsat_window = function(sc, aoi, buffer_m, template = NULL) {
+    switch(sc$id,
+           A = tile(0.5),
+           B = rlang::abort("scene does not cover the AOI"),
+           C = rlang::abort("HTTP 503 from /vsicurl"),
+           D = tile(0.7))
+  })
+  aoi <- sf::st_as_sfc(sf::st_bbox(c(xmin = x0, xmax = x0 + 90, ymin = y0, ymax = y0 + 90), crs = utm))
+  expect_warning(expect_warning(comp <- landsat_composite(scenes, aoi), "Skipping Landsat scene B"),
+                 "Skipping Landsat scene C")
+  expect_equal(attr(comp, "scenes"), c("A", "D"))
+  log <- attr(comp, "scene_log")
+  expect_equal(log$id, c("A", "B", "C", "D"))
+  expect_equal(log$used, c(TRUE, FALSE, FALSE, TRUE))
+  expect_equal(log$skip_reason, c(NA, "no coverage", "HTTP 503 from /vsicurl", NA))
+  expect_equal(unname(terra::values(comp$n_obs)[1]), 2)
+})

@@ -14,14 +14,15 @@ corridor_rasters(
   min_linearity = 0.6,
   gap_m = 1.5,
   drop = NULL,
-  void_m = 5
+  void_m = 5,
+  linearity = NULL
 )
 }
 \arguments{
 \item{las}{Height-normalised \code{LAS} from \code{\link[=read_corridor]{read_corridor()}}.}
 
 \item{pred}{Output of \code{\link[=predict_points]{predict_points()}} (with the weak \code{label} column and
-the \code{linearity_k10} feature).}
+the linearity feature named by \code{linearity}).}
 
 \item{res_m}{Raster resolution in metres.}
 
@@ -45,6 +46,11 @@ not to be canopy, so they do not make a cell unobserved.}
 \item{void_m}{Width of the square window (metres) that must contain no
 LiDAR return of any class for a cell to count as a void. Wide enough
 that ordinary point spacing never empties it (3DEP QL2 is >= 2 pts/m^2).}
+
+\item{linearity}{Name of the linearity column in \code{pred} used for that
+test. By default the smallest neighbourhood \code{\link[=point_features]{point_features()}} recorded
+on \code{pred} (\code{linearity_k10} for the default \code{k}); an absent column is an
+error, never silently "not linear".}
 }
 \value{
 A list with \code{dtm} (ground elevation) and \code{chm} (canopy height),
