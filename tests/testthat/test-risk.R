@@ -211,3 +211,155 @@ test_that("structure-masked cells stay unobserved through the crown-support filt
   expect_equal(s$wire_zone_cover[s$seg_id == 1], 1)
   expect_equal(s$wire_zone_cover[s$seg_id == 2], 1)
 })
+
+# A height-normalised LAS over a 60 x 40 m patch along the line y = y0:
+# ground every 0.5 m, plus any above-ground points supplied.
+make_las <- function(above = NULL, hole_x = NULL) {
+  g <- expand.grid(X = x0 + seq(0, 60, 0.5), Y = y0 + seq(-20, 20, 0.5))
+  pts <- data.frame(g, Z = 0, Classification = 2L)
+  if (!is.null(above)) pts <- rbind(pts, data.frame(above, Classification = 1L))
+  if (!is.null(hole_x)) pts <- pts[!(pts$X > x0 + hole_x[1] & pts$X < x0 + hole_x[2]), ]
+  pts$ReturnNumber <- 1L
+  pts$NumberOfReturns <- 1L
+  pts$Intensity <- 100L
+  las <- lidR::LAS(data.table::as.data.table(pts), crs = sf::st_crs(utm))
+  lidR::normalize_height(las, lidR::tin())
+}
+
+pred_for <- function(las, label) {
+  ag <- which(las$Classification != 2L)
+  data.table::data.table(pid = ag, X = las$X[ag], Y = las$Y[ag], height_m = las$Z[ag],
+                         pred = factor("vegetation", levels = label_levels),
+                         label = factor(label(las$X[ag], las$Y[ag], las$Z[ag]), levels = label_levels))
+}
+
+segs60 <- function(seg_m) {
+  ln <- sf::st_sf(geometry = sf::st_sfc(sf::st_linestring(rbind(c(x0, y0), c(x0 + 60, y0))), crs = utm))
+  segment_lines(ln, utm, seg_m = seg_m)
+}
+
+test_that("a LiDAR void is unobserved and its segment is 'no data', not 'none' (#4)", {
+  set.seed(1)
+  tree <- data.frame(X = x0 + 50 + runif(200, -1, 1), Y = y0 + 15 + runif(200, -1, 1), Z = runif(200, 2, 6))
+  las <- make_las(tree, hole_x = c(20, 40))           # a missing tile, say
+  r <- corridor_rasters(las, pred_for(las, function(x, y, z) "vegetation"))
+  mid <- cbind(x0 + 30.25, y0 + 0.25)
+  expect_false(is.na(terra::extract(r$dtm, mid)[, 1])) # the TIN bridges the hole...
+  expect_true(terra::extract(r$unobserved, mid)[, 1] == 1) # ...but it is flagged
+  expect_true(terra::extract(r$void, mid)[, 1] == 1)
+  # ordinary 0.5 m point spacing never reads as a void
+  expect_false(terra::extract(r$void, cbind(x0 + 10.25, y0 + 0.25))[, 1] == 1)
+
+  s <- segs60(20)
+  prof <- conductor_profile(no_wires, s, r$dtm, min_ground_clear_m = 10, attach_m = 10)
+  rk <- sf::st_drop_geometry(assess_risk(r, prof, s, tree_ws_m = 3)$segments)
+  rk <- rk[order(rk$seg_id), ]
+  expect_equal(as.character(rk$priority), c("none", "no data", "none"))
+  expect_equal(as.character(rk$priority_lo), c("none", "no data", "none"))
+  expect_lt(rk$frac_observed[2], 0.5)
+  expect_equal(rk$frac_observed[c(1, 3)], c(1, 1), tolerance = 0.01)
+})
+
+test_that("canopy left unlabelled beside a wire is unobserved, not bare ground (#6)", {
+  set.seed(2)
+  wire <- data.frame(X = x0 + seq(0, 60, 0.25), Y = y0 + 0.25, Z = 12)
+  # a crown 1.5 m beside the wire, topping out 3 m below it: inside the
+  # weak-label margin, so it is unlabelled (NA)
+  crown <- data.frame(X = x0 + 45.25 + runif(60, -0.2, 0.2), Y = y0 + 1.75 + runif(60, -0.2, 0.2),
+                      Z = runif(60, 2, 9))
+  las <- make_las(rbind(wire, crown))
+  lab <- function(x, y, z) ifelse(abs(y - (y0 + 0.25)) < 1e-6, "wire", NA)
+  r <- corridor_rasters(las, pred_for(las, lab))
+  at_crown <- cbind(x0 + 45.25, y0 + 1.75)
+  expect_true(is.na(terra::extract(r$chm, at_crown)[, 1]))     # not in the canopy model
+  expect_true(terra::extract(r$unobserved, at_crown)[, 1] == 1) # but unknown, not bare
+  expect_false(terra::extract(r$void, at_crown)[, 1] == 1)
+  # a wire-labelled cell has an observed air gap beneath it: it stays bare ground
+  expect_false(terra::extract(r$unobserved, cbind(x0 + 10.1, y0 + 0.25))[, 1] == 1)
+  expect_gte(r$n_uncertain_excluded, 60)
+
+  s <- segs60(30)
+  prof <- conductor_profile(no_wires, s, r$dtm, min_ground_clear_m = 12, attach_m = 12)
+  rk <- sf::st_drop_geometry(assess_risk(r, prof, s, tree_ws_m = 3)$segments)
+  rk <- rk[order(rk$seg_id), ]
+  # the crown's cells drop out of the observed share of its segment only
+  expect_equal(rk$frac_observed_under[1], 1, tolerance = 0.01)
+  expect_lt(rk$frac_observed_under[2], 1)
+})
+
+test_that("low coverage turns 'none' into 'no data' but keeps real findings", {
+  trees <- data.frame(x = x0 + 25.5, y = y0 + 0.5, h = 9) # grow-in in segment 1
+  r <- make_rasters(trees)
+  xy <- terra::crds(r$dtm, na.rm = FALSE)
+  hide <- function(xmin, xmax) xy[, 1] > x0 + xmin & xy[, 1] < x0 + xmax & abs(xy[, 2] - y0) < 10
+  r$unobserved <- terra::setValues(r$dtm, hide(40, 100) | hide(100, 160))
+  s <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3)$segments)
+  s <- s[order(s$seg_id), ]
+  expect_equal(s$frac_observed, c(0.4, 0.4), tolerance = 0.02)
+  expect_equal(as.character(s$priority), c("grow-in", "no data"))
+  # full coverage leaves the tiers unchanged
+  r$unobserved <- NULL
+  s2 <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3)$segments)
+  expect_equal(as.character(s2$priority[order(s2$seg_id)]), c("grow-in", "none"))
+})
+
+test_that("coverage counts structure footprints as observed and ignores cells past the line ends", {
+  r <- make_rasters(data.frame(x = x0 + 150.5, y = y0 + 40.5, h = 4))
+  # a line shorter than the raster: cells beyond its ends are not its corridor
+  ln <- sf::st_sf(geometry = sf::st_sfc(sf::st_linestring(rbind(c(x0 + 50, y0), c(x0 + 150, y0))), crs = utm))
+  s <- segment_lines(ln, utm, seg_m = 50)
+  prof <- conductor_profile(no_wires, s, r$dtm, min_ground_clear_m = 10, attach_m = 10)
+  xy <- terra::crds(r$dtm, na.rm = FALSE)
+  # the tower's own returns left the cell uncertain: unobserved in the rasters
+  r$unobserved <- terra::setValues(r$dtm, abs(xy[, 1] - (x0 + 75)) < 6 & abs(xy[, 2] - y0) < 6)
+  tower <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(x0 + 75, y0)), crs = utm))
+  open <- sf::st_drop_geometry(assess_risk(r, prof, s)$segments)
+  masked <- sf::st_drop_geometry(assess_risk(r, prof, s, structures = tower)$segments)
+  open <- open[order(open$seg_id), ]
+  masked <- masked[order(masked$seg_id), ]
+  expect_equal(open$frac_observed[2], 1, tolerance = 0.01)  # past-the-end cells ignored
+  expect_lt(open$frac_observed_under[1], 0.9)              # the gap counts...
+  expect_gt(masked$frac_observed_under[1], 0.99)           # ...unless it is a known structure
+})
+
+test_that("'no data' under both bounds gets 'low coverage' and is drawn apart on the map", {
+  r <- make_rasters(data.frame(x = x0 + 150.5, y = y0 + 40.5, h = 4))
+  xy <- terra::crds(r$dtm, na.rm = FALSE)
+  r$unobserved <- terra::setValues(r$dtm, xy[, 1] < x0 + 70 & abs(xy[, 2] - y0) < 10)
+  rk <- risk_for(r, tree_ws_m = 3)
+  s <- sf::st_drop_geometry(rk$segments)
+  expect_equal(as.character(s$confidence[s$seg_id == 1]), "low coverage")
+  expect_equal(as.character(s$priority_lo[s$seg_id == 1]), "no data")
+  skip_if_not_installed("ggplot2")
+  p <- plot_risk_map(r, rk)
+  expect_s3_class(p, "ggplot")
+  # (no strike trees here, so the shape scale warns about an empty layer)
+  built <- suppressWarnings(ggplot2::ggplot_build(p))
+  expect_true("insufficient LiDAR coverage" %in% built$plot$layers[[3]]$data$certain)
+})
+
+test_that("the midmod risk map dots 'no data' segments and ignores voids off the corridor", {
+  skip_if_not_installed("ggplot2")
+  withr::local_options(vegrisk.style = "midmod")
+  r <- make_rasters(data.frame(x = x0 + 150.5, y = y0 + 5.5, h = 6))
+  xy <- terra::crds(r$dtm, na.rm = FALSE)
+  # a void under segment 1, plus off-corridor "voids" in the outer rows
+  outside <- abs(xy[, 2] - y0) > 40 # beyond the corridor clip: no returns
+  r$void <- terra::setValues(r$dtm, outside)
+  r$unobserved <- terra::setValues(r$dtm, (xy[, 1] < x0 + 70 & abs(xy[, 2] - y0) < 10) | outside)
+  rk <- risk_for(r, tree_ws_m = 3)
+  built <- suppressWarnings(ggplot2::ggplot_build(plot_risk_map(r, rk)))
+  sub <- built$plot$labels$subtitle
+  expect_match(sub, "Dotted segments")
+  # only the in-corridor void is counted: 70 x 20 cells, not the outer rows
+  expect_match(sub, "1,400 m² unobserved")
+  expect_no_match(sub, "on any segment")
+  # the no-data segment is its own dotted layer, off the encroachment ramp
+  i <- which(vapply(built$plot$layers, function(l) {
+    d <- l$data
+    !is.null(l$mapping$linetype) && is.data.frame(d) && nrow(d) > 0 &&
+      all(d$certain == "insufficient LiDAR coverage")
+  }, logical(1)))
+  expect_length(i, 1)
+  expect_true(all(built$data[[i]]$linetype == "11"))
+})

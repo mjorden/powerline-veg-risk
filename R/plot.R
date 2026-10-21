@@ -139,7 +139,9 @@ theme_vegrisk <- function(base_size = 10, style = vegrisk_style()) {
 #' pessimistic (lower) conductor bound - where to verify first, not a
 #' finding; line type is the confidence (solid =
 #' measured conductor or same tier under both bounds, dashed = tier depends
-#' on the unknown conductor elevation).
+#' on the unknown conductor elevation). Segments tiered `"no data"` (too
+#' little of the corridor observed to claim no risk) are drawn grey and
+#' dotted instead of on the encroachment scale, so they never read as clear.
 #'
 #' @param rasters Output of [corridor_rasters()].
 #' @param risk Output of [assess_risk()].
@@ -159,6 +161,9 @@ plot_risk_map <- function(rasters, risk, structures = NULL,
   crs <- sf::st_crs(risk$segments)
   seg <- risk$segments
   seg$certain <- ifelse(seg$confidence == "bound-dependent", "bound-dependent", "measured / robust")
+  # "no data" only replaces "none", so this means no data under both bounds.
+  seg$certain[seg$priority_lo %in% "no data"] <- "insufficient LiDAR coverage"
+  gap <- seg$certain == "insufficient LiDAR coverage"
   strike <- risk$trees[risk$trees$strike, ]
   strike$both <- factor(ifelse(strike$strike_lo & strike$strike_hi, "under both bounds", "under one bound"),
                         levels = c("under both bounds", "under one bound"))
@@ -167,10 +172,12 @@ plot_risk_map <- function(rasters, risk, structures = NULL,
     ggplot2::geom_raster(data = chm, ggplot2::aes(x, y, fill = h)) +
     scale_fill_vegrisk_canopy(limits = c(0, 30), oob = scales::squish, name = "Canopy height (m)",
                               pal = pal) +
-    ggplot2::geom_sf(data = seg, ggplot2::aes(colour = encroach_lo_m2, linetype = certain), linewidth = 1.1) +
+    ggplot2::geom_sf(data = seg[!gap, ], ggplot2::aes(colour = encroach_lo_m2, linetype = certain), linewidth = 1.1) +
+    ggplot2::geom_sf(data = seg[gap, ], ggplot2::aes(linetype = certain), colour = pal$muted, linewidth = 1.1) +
     scale_colour_vegrisk_encroach(name = "Canopy in clearance envelope\nif conductor at code minimum (m\u00b2)",
-                                  pal = pal) +
-    ggplot2::scale_linetype_manual(values = c(`measured / robust` = "solid", `bound-dependent` = "22"),
+                                  limits = if (any(gap)) c(0, NA), pal = pal) +
+    ggplot2::scale_linetype_manual(values = c(`measured / robust` = "solid", `bound-dependent` = "22",
+                                              `insufficient LiDAR coverage` = "11"),
                                    name = NULL) +
     ggplot2::geom_sf(data = strike, ggplot2::aes(shape = both), size = 1.5, stroke = 0.4,
                      fill = pal$strike_fill, colour = pal$strike_line) +
@@ -210,13 +217,16 @@ risk_map_midmod <- function(rasters, risk, structures, title, source, file) {
   m <- crs_m_per_unit(crs)
   seg <- risk$segments
   seg$certain <- ifelse(seg$confidence == "bound-dependent", "bound-dependent", "measured / robust")
+  # "no data" only replaces "none", so this means no data under both bounds.
+  seg$certain[seg$priority_lo %in% "no data"] <- "insufficient LiDAR coverage"
   strike <- risk$trees[risk$trees$strike, ]
   strike$both <- factor(ifelse(strike$strike_lo & strike$strike_hi, "under both bounds", "under one bound"),
                         levels = c("under both bounds", "under one bound"))
   # #5: zero is absence, not low-grade risk - zero segments get a thin
   # neutral line and the ramp covers only values above zero.
-  seg$zero <- seg$encroach_lo_m2 %in% 0
-  pos <- seg[!seg$zero, ]
+  gap <- seg$certain == "insufficient LiDAR coverage"
+  seg$zero <- seg$encroach_lo_m2 %in% 0 & !gap
+  pos <- seg[!seg$zero & !gap, ]
   top <- max(c(1, pos$encroach_lo_m2), na.rm = TRUE)
   bar <- function(order) ggplot2::guide_colourbar(order = order, title.position = "top",
                                                   barwidth = ggplot2::unit(9, "lines"),
@@ -228,6 +238,16 @@ risk_map_midmod <- function(rasters, risk, structures, title, source, file) {
   if (!is.null(rasters$unobserved)) {
     un <- terra::as.data.frame(rasters$unobserved, xy = TRUE, na.rm = TRUE)
     un <- un[un[[3]] %in% TRUE, c("x", "y")]
+    # Voids fill the bounding box outside the clipped corridor too; keep only
+    # cells no farther from the line than the LiDAR returns reach (cells
+    # with returns are the clipped corridor).
+    if (nrow(un) && !is.null(rasters$void)) {
+      ref <- terra::as.data.frame(rasters$void, xy = TRUE, na.rm = TRUE)
+      ref <- ref[ref[[3]] %in% FALSE, c("x", "y")]
+      verts <- line_vertex_table(seg, crs)
+      d <- function(xy) FNN::get.knnx(as.matrix(verts[, c("x", "y")]), as.matrix(xy), k = 1)$nn.dist[, 1]
+      un <- if (nrow(ref)) un[d(un) <= max(d(ref)), ] else un[0, ]
+    }
     if (!nrow(un)) un <- NULL
   }
   p <- ggplot2::ggplot() +
@@ -268,7 +288,9 @@ risk_map_midmod <- function(rasters, risk, structures, title, source, file) {
   }
   p <- p +
     ggplot2::geom_sf(data = seg[seg$zero, ], ggplot2::aes(linetype = certain), colour = pal$line,
-                     linewidth = 0.5, lineend = "butt")
+                     linewidth = 0.5, lineend = "butt") +
+    ggplot2::geom_sf(data = seg[gap, ], ggplot2::aes(linetype = certain), colour = pal$nodata,
+                     linewidth = 0.9, lineend = "butt")
   if (nrow(pos)) {
     p <- p +
       ggplot2::geom_sf(data = pos, ggplot2::aes(colour = encroach_lo_m2, linetype = certain),
@@ -278,7 +300,8 @@ risk_map_midmod <- function(rasters, risk, structures, title, source, file) {
                                     breaks = scales::breaks_extended(4), guide = bar(2))
   }
   p <- p +
-    ggplot2::scale_linetype_manual(values = c(`measured / robust` = "solid", `bound-dependent` = "22"),
+    ggplot2::scale_linetype_manual(values = c(`measured / robust` = "solid", `bound-dependent` = "22",
+                                              `insufficient LiDAR coverage` = "11"),
                                    guide = "none")
 
   # Metric scale bar, bottom-left, instead of a graticule.
@@ -299,11 +322,14 @@ risk_map_midmod <- function(rasters, risk, structures, title, source, file) {
   dashed_note <- if (any(seg$certain == "bound-dependent")) {
     "\nDashed segments: tier depends on the unknown conductor elevation."
   } else ""
-  zero_note <- if (!nrow(pos)) {
-    "\nNo canopy in the clearance envelope on any segment (thin line)."
+  if (any(seg$certain == "insufficient LiDAR coverage")) {
+    dashed_note <- paste0(dashed_note, "\nDotted segments: too little of the corridor observed to claim no risk.")
+  }
+  zero_note <- if (!nrow(pos) && any(seg$zero)) {
+    paste0("\nNo canopy in the clearance envelope on any ", if (any(gap)) "observed ", "segment (thin line).")
   } else if (any(seg$zero)) "\nThin line: no canopy in the clearance envelope." else ""
   unobs_note <- if (!is.null(un)) {
-    sprintf("\n%s m\u00b2 unobserved where conductor returns were removed (grey; not bare ground).",
+    sprintf("\n%s m\u00b2 unobserved by the LiDAR or left out as uncertain (grey; not bare ground).",
             format(round(nrow(un) * prod(terra::res(rasters$unobserved)) * m^2), big.mark = ","))
   } else ""
   p <- p +
