@@ -3,6 +3,9 @@
 # figures to man/figures/<id>_*.png, cached OSM layers to data-raw/<id>/.
 
 devtools::load_all(quiet = TRUE)
+# README figures use the mid-century earth-tone style from #40; the package
+# default stays "classic".
+options(vegrisk.style = "midmod")
 suppressPackageStartupMessages({
   library(sf)
   library(data.table)

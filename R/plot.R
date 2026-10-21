@@ -624,9 +624,11 @@ plot_canopy_dryness <- function(dryness, title = NULL, file = NULL) {
                   subtitle = sprintf(paste("Dry-season median of %d Landsat scenes, %s to %s.",
                                            "\nDry = segment in the lowest %.0f%% of the corridor's canopy pixels by %s.",
                                            "\nGrown in = optimistic-bound grow-in tier from LiDAR.",
-                                           "Grey pixels: < %.0f%% canopy, not scored."),
+                                           "\nGrey pixels not scored: < %.0f%% canopy, < %.0f%% observed by the LiDAR,",
+                                           "or < %d clear looks."),
                                      length(info$scenes), format(dates[1], "%b %Y"), format(dates[2], "%b %Y"),
-                                     100 * info$dry_quantile, toupper(key), 100 * info$min_canopy_frac),
+                                     100 * info$dry_quantile, toupper(key), 100 * info$min_canopy_frac,
+                                     100 * (info$min_coverage %||% 0), info$min_obs %||% 1L),
                   x = NULL, y = NULL) +
     ggplot2::coord_sf(crs = crs, datum = crs, expand = FALSE) +
     ggplot2::scale_x_continuous(n.breaks = 3) +
