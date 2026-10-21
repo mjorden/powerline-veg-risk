@@ -22,7 +22,8 @@ corridor_rasters(
   min_linearity = 0.6,
   gap_m = 1.5,
   drop = NULL,
-  void_m = 5
+  void_m = 5,
+  linearity = NULL
 )
 ```
 
@@ -37,7 +38,8 @@ corridor_rasters(
 
   Output of
   [`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md)
-  (with the weak `label` column and the `linearity_k10` feature).
+  (with the weak `label` column and the linearity feature named by
+  `linearity`).
 
 - res_m:
 
@@ -76,6 +78,14 @@ corridor_rasters(
   Width of the square window (metres) that must contain no LiDAR return
   of any class for a cell to count as a void. Wide enough that ordinary
   point spacing never empties it (3DEP QL2 is \>= 2 pts/m^2).
+
+- linearity:
+
+  Name of the linearity column in `pred` used for that test. By default
+  the smallest neighbourhood
+  [`point_features()`](https://mjorden.github.io/powerline-veg-risk/reference/point_features.md)
+  recorded on `pred` (`linearity_k10` for the default `k`); an absent
+  column is an error, never silently "not linear".
 
 ## Value
 

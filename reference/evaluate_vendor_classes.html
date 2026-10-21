@@ -91,10 +91,12 @@ same length as <code>labels</code>.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A list with <code>metrics</code> (per-class precision, recall, F1, n, plus
-<code>balanced_accuracy</code> and <code>kappa</code>), <code>baseline</code> (the same for predicting
-the majority class everywhere) and <code>confusion</code>. With no points in a
-mapped vendor class, every metric is <code>NA</code> (with a warning).</p>
+    <p>A list with <code>metrics</code> (one row per mapped class: <code>n</code>,
+<code>prevalence</code>, <code>predicted</code>, <code>precision</code>, <code>recall</code>, <code>f1</code>), <code>summary</code> (one
+row: <code>n</code> points scored, <code>balanced_accuracy</code>, <code>kappa</code>), <code>baseline</code> (a
+list with the same <code>metrics</code> and <code>summary</code> for predicting the majority
+class everywhere) and <code>confusion</code>. With no points in a mapped vendor
+class, every metric is <code>NA</code> (with a warning).</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

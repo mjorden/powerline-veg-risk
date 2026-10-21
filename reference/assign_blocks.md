@@ -5,7 +5,7 @@ Assign points to spatial blocks and CV folds
 ## Usage
 
 ``` r
-assign_blocks(feat, crs, block_m = 100, n_folds = 5, seed = 1)
+assign_blocks(feat, crs = NULL, block_m = 100, n_folds = 5, seed = 1)
 ```
 
 ## Arguments
@@ -16,7 +16,9 @@ assign_blocks(feat, crs, block_m = 100, n_folds = 5, seed = 1)
 
 - crs:
 
-  CRS of the coordinates.
+  CRS of the coordinates; defaults to the one recorded by
+  [`point_features()`](https://mjorden.github.io/powerline-veg-risk/reference/point_features.md)
+  and must agree with it when both are given.
 
 - block_m:
 
@@ -32,4 +34,6 @@ assign_blocks(feat, crs, block_m = 100, n_folds = 5, seed = 1)
 
 ## Value
 
-`feat` with integer columns `block` and `fold`.
+`feat` with integer columns `block` and `fold`. Block ids are numbered
+by position (west to east, then south to north), so they do not depend
+on row order.

@@ -38,7 +38,9 @@ evaluate_vendor_classes(
 
 ## Value
 
-A list with `metrics` (per-class precision, recall, F1, n, plus
-`balanced_accuracy` and `kappa`), `baseline` (the same for predicting
-the majority class everywhere) and `confusion`. With no points in a
-mapped vendor class, every metric is `NA` (with a warning).
+A list with `metrics` (one row per mapped class: `n`, `prevalence`,
+`predicted`, `precision`, `recall`, `f1`), `summary` (one row: `n`
+points scored, `balanced_accuracy`, `kappa`), `baseline` (a list with
+the same `metrics` and `summary` for predicting the majority class
+everywhere) and `confusion`. With no points in a mapped vendor class,
+every metric is `NA` (with a warning).

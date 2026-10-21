@@ -49,4 +49,13 @@ train_point_classifier(
 
 ## Value
 
-A `ranger` model (probability forest).
+A `ranger` model (probability forest) with `$prior` (label prevalence)
+and `$features` (the predictor names).
+
+## Details
+
+Predictors are the columns
+[`point_features()`](https://mjorden.github.io/powerline-veg-risk/reference/point_features.md)
+recorded (its `features` attribute) minus `drop_features`; a label, a
+fold id, a joined column or a previous model's `pred` / `p_*` output is
+never used as a predictor.

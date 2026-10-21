@@ -70,7 +70,11 @@ observations.</p>
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A <code>SpatRaster</code> on the Landsat 30 m grid (UTM) with layers <code>ndvi</code>,
 <code>ndmi</code> and <code>n_obs</code> (clear observations per pixel). Attributes <code>scenes</code>
-(ids used) and <code>dates</code> record what went into it.</p>
+(ids used) and <code>dates</code> record what went into it; <code>scene_log</code> is a data
+frame of every scene offered (<code>id</code>, <code>datetime</code>, <code>used</code>, <code>skip_reason</code>:
+<code>NA</code> when used, <code>"no coverage"</code> when the scene misses the AOI, else
+the read error), so a composite thinned by transient failures can be
+told from one that used every scene.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>

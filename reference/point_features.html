@@ -61,7 +61,9 @@ featurised (they are ground / low cover, handled by the ground class).</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A <code>data.table</code> with <code>pid</code> (row index into <code>las@data</code>), <code>X</code>, <code>Y</code>,
-<code>Z</code>, and feature columns.</p>
+<code>Z</code>, and feature columns. Attributes <code>crs</code> (the CRS of <code>las</code>), <code>k</code> and
+<code>features</code> (the predictor column names) travel with the table through
+<code><a href="weak_labels.html">weak_labels()</a></code>, <code><a href="assign_blocks.html">assign_blocks()</a></code> and <code><a href="predict_points.html">predict_points()</a></code>.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

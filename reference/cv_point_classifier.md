@@ -57,7 +57,9 @@ cv_point_classifier(
 
 ## Value
 
-A list with `metrics` (per-class precision / recall / F1 and balanced
-accuracy for each scheme), `confusion` (spatial-CV confusion matrix in
-estimated point counts, rows = weak label, columns = prediction) and
-`fold_counts` (labelled points per spatial fold).
+A list with `metrics` (one row per scheme and class: `n` estimated
+held-out points, `prevalence`, `precision`, `recall`, `f1`,
+`avg_precision`), `summary` (one row per scheme: `balanced_accuracy`,
+`n_eval`), `confusion` (spatial-CV confusion matrix in estimated point
+counts, rows = weak label, columns = prediction) and `fold_counts`
+(labelled points per spatial fold).

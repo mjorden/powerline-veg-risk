@@ -27,4 +27,9 @@ point_features(las, k = c(10L, 30L), min_height_m = 2)
 ## Value
 
 A `data.table` with `pid` (row index into `las@data`), `X`, `Y`, `Z`,
-and feature columns.
+and feature columns. Attributes `crs` (the CRS of `las`), `k` and
+`features` (the predictor column names) travel with the table through
+[`weak_labels()`](https://mjorden.github.io/powerline-veg-risk/reference/weak_labels.md),
+[`assign_blocks()`](https://mjorden.github.io/powerline-veg-risk/reference/assign_blocks.md)
+and
+[`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md).

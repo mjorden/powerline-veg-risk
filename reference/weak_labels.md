@@ -7,7 +7,7 @@ Assign weak labels to featurised points
 ``` r
 weak_labels(
   feat,
-  crs,
+  crs = NULL,
   lines,
   structures = NULL,
   buildings = NULL,
@@ -37,7 +37,9 @@ weak_labels(
 
 - crs:
 
-  CRS of the point cloud.
+  CRS of the point cloud; defaults to the one recorded by
+  [`point_features()`](https://mjorden.github.io/powerline-veg-risk/reference/point_features.md)
+  and must agree with it when both are given.
 
 - lines, structures, buildings:
 

@@ -92,8 +92,8 @@ conductor_profile(
 
 ## Value
 
-data.frame of vertices: `line_id`, `x`, `y`, `s_m`, `seg_id`, `ground`,
-`z_lo`, `z_hi`, `src`.
+data.frame of vertices: `line_id`, `x`, `y`, `tx`, `ty` (unit tangent
+along the line), `s_m`, `seg_id`, `ground`, `z_lo`, `z_hi`, `src`.
 
 ## Details
 

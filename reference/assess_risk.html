@@ -161,8 +161,11 @@ cannot be claimed where the LiDAR did not see the ground.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A list: <code>segments</code> (<code>sf</code>, one row per segment) and <code>trees</code> (<code>sf</code>
-treetops). Columns ending <code>_lo</code> / <code>_hi</code> use the lower / upper conductor
-bound. <code>frac_observed</code> and <code>frac_observed_under</code> are the shares of the
+treetops: <code>seg_id</code>, <code>height_m</code>, <code>dh_m</code> horizontal distance to the
+nearest conductor, <code>reach_lo_m</code> / <code>reach_hi_m</code> the height a tree there
+needs to reach the conductor under each bound, <code>strike_lo</code> /
+<code>strike_hi</code> / <code>strike</code> whether it does). Columns ending <code>_lo</code> / <code>_hi</code>
+use the lower / upper conductor bound. <code>frac_observed</code> and <code>frac_observed_under</code> are the shares of the
 grid cells within <code>coverage_m</code> and <code>under_line_m</code> of the segment (not
 past the line's ends) with an observed terrain and canopy value; cells
 off the edge of the data count as unobserved, structure-masked cells as

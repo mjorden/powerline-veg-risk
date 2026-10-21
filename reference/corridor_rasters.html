@@ -66,7 +66,8 @@ conductor's height - zero clearance by construction.</p>
 <span>  min_linearity <span class="op">=</span> <span class="fl">0.6</span>,</span>
 <span>  gap_m <span class="op">=</span> <span class="fl">1.5</span>,</span>
 <span>  drop <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  void_m <span class="op">=</span> <span class="fl">5</span></span>
+<span>  void_m <span class="op">=</span> <span class="fl">5</span>,</span>
+<span>  linearity <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -80,7 +81,7 @@ conductor's height - zero clearance by construction.</p>
 
 <dt id="arg-pred">pred<a class="anchor" aria-label="anchor" href="#arg-pred"></a></dt>
 <dd><p>Output of <code><a href="predict_points.html">predict_points()</a></code> (with the weak <code>label</code> column and
-the <code>linearity_k10</code> feature).</p></dd>
+the linearity feature named by <code>linearity</code>).</p></dd>
 
 
 <dt id="arg-res-m">res_m<a class="anchor" aria-label="anchor" href="#arg-res-m"></a></dt>
@@ -120,6 +121,13 @@ not to be canopy, so they do not make a cell unobserved.</p></dd>
 <dd><p>Width of the square window (metres) that must contain no
 LiDAR return of any class for a cell to count as a void. Wide enough
 that ordinary point spacing never empties it (3DEP QL2 is &gt;= 2 pts/m^2).</p></dd>
+
+
+<dt id="arg-linearity">linearity<a class="anchor" aria-label="anchor" href="#arg-linearity"></a></dt>
+<dd><p>Name of the linearity column in <code>pred</code> used for that
+test. By default the smallest neighbourhood <code><a href="point_features.html">point_features()</a></code> recorded
+on <code>pred</code> (<code>linearity_k10</code> for the default <code>k</code>); an absent column is an
+error, never silently "not linear".</p></dd>
 
 </dl></div>
     <div class="section level2">
