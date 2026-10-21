@@ -56,7 +56,9 @@ conductor_profile() (identical where the conductor is measured)."></head><body>
 <span>  min_support <span class="op">=</span> <span class="fl">6</span>,</span>
 <span>  structures <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  structure_mask_m <span class="op">=</span> <span class="fl">8</span>,</span>
-<span>  min_encroach_m2 <span class="op">=</span> <span class="fl">5</span></span>
+<span>  min_encroach_m2 <span class="op">=</span> <span class="fl">5</span>,</span>
+<span>  coverage_m <span class="op">=</span> <span class="va">wire_zone_m</span>,</span>
+<span>  min_observed <span class="op">=</span> <span class="fl">0.75</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -133,26 +135,49 @@ H-frames and crossarms are not scored as trees under the line.</p></dd>
 
 <dt id="arg-structure-mask-m">structure_mask_m<a class="anchor" aria-label="anchor" href="#arg-structure-mask-m"></a></dt>
 <dd><p>Mask radius around each structure (metres); should
-cover the structure's across-line width. Masked cells are treated as
-unobserved (excluded from cover and clearance), and trees there are not
-scored.</p></dd>
+cover the structure's across-line width. Masked cells are excluded from
+cover and clearance and trees there are not scored, but they count as
+observed for <code>frac_observed</code> (a known structure, not a data gap).</p></dd>
 
 
 <dt id="arg-min-encroach-m-">min_encroach_m2<a class="anchor" aria-label="anchor" href="#arg-min-encroach-m-"></a></dt>
 <dd><p>Canopy area inside the clearance envelope needed to
 call a segment grow-in (guards against single-cell artefacts).</p></dd>
 
+
+<dt id="arg-coverage-m">coverage_m<a class="anchor" aria-label="anchor" href="#arg-coverage-m"></a></dt>
+<dd><p>Half-width of the band over which LiDAR coverage is
+measured (<code>frac_observed</code>). Set it to the corridor half-width so that
+voids beside the line, where strike trees stand, count too.</p></dd>
+
+
+<dt id="arg-min-observed">min_observed<a class="anchor" aria-label="anchor" href="#arg-min-observed"></a></dt>
+<dd><p>A segment whose observed share of either the
+<code>coverage_m</code> band or the <code>under_line_m</code> zone is below this, and that
+would otherwise be <code>"none"</code>, is tiered <code>"no data"</code>: absence of risk
+cannot be claimed where the LiDAR did not see the ground.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A list: <code>segments</code> (<code>sf</code>, one row per segment) and <code>trees</code> (<code>sf</code>
 treetops). Columns ending <code>_lo</code> / <code>_hi</code> use the lower / upper conductor
-bound. <code>priority</code> is the tier under the optimistic (upper) bound, i.e.
+bound. <code>frac_observed</code> and <code>frac_observed_under</code> are the shares of the
+grid cells within <code>coverage_m</code> and <code>under_line_m</code> of the segment (not
+past the line's ends) with an observed terrain and canopy value; cells
+off the edge of the data count as unobserved, structure-masked cells as
+observed (known structures, not gaps).
+<code>priority</code> is the tier under the optimistic (upper) bound, i.e.
 what holds even if the conductor is as high as plausible; <code>priority_lo</code>
 is the pessimistic tier, which saturates wherever canopy stands under a
-bounded span (the lower bound is only ~5 m above ground). <code>confidence</code> is
+bounded span (the lower bound is only ~5 m above ground). Tiers are
+<code>"grow-in"</code>, <code>"fall-in"</code>, <code>"no data"</code> (no risk found, but coverage below
+<code>min_observed</code>) and <code>"none"</code>. A grow-in or fall-in finding stands even
+at low coverage, though unseen cells could hide a more severe tier.
+<code>confidence</code> is
 <code>"measured"</code> (conductor observed over at least half the segment),
-<code>"robust"</code> (same tier under both bounds) or <code>"bound-dependent"</code>.
+<code>"robust"</code> (same tier under both bounds), <code>"bound-dependent"</code> or
+<code>"low coverage"</code> (<code>"no data"</code> under both bounds).
 <code>encroach_*_m2</code> is the canopy area under the conductors inside the
 clearance envelope. Rows are ordered by what holds even under the
 optimistic (upper) conductor bound - encroachment, then strike trees -

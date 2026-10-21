@@ -22,7 +22,9 @@ assess_risk(
   min_support = 6,
   structures = NULL,
   structure_mask_m = 8,
-  min_encroach_m2 = 5
+  min_encroach_m2 = 5,
+  coverage_m = wire_zone_m,
+  min_observed = 0.75
 )
 ```
 
@@ -101,25 +103,48 @@ assess_risk(
 - structure_mask_m:
 
   Mask radius around each structure (metres); should cover the
-  structure's across-line width. Masked cells are treated as unobserved
-  (excluded from cover and clearance), and trees there are not scored.
+  structure's across-line width. Masked cells are excluded from cover
+  and clearance and trees there are not scored, but they count as
+  observed for `frac_observed` (a known structure, not a data gap).
 
 - min_encroach_m2:
 
   Canopy area inside the clearance envelope needed to call a segment
   grow-in (guards against single-cell artefacts).
 
+- coverage_m:
+
+  Half-width of the band over which LiDAR coverage is measured
+  (`frac_observed`). Set it to the corridor half-width so that voids
+  beside the line, where strike trees stand, count too.
+
+- min_observed:
+
+  A segment whose observed share of either the `coverage_m` band or the
+  `under_line_m` zone is below this, and that would otherwise be
+  `"none"`, is tiered `"no data"`: absence of risk cannot be claimed
+  where the LiDAR did not see the ground.
+
 ## Value
 
 A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
 treetops). Columns ending `_lo` / `_hi` use the lower / upper conductor
-bound. `priority` is the tier under the optimistic (upper) bound, i.e.
-what holds even if the conductor is as high as plausible; `priority_lo`
-is the pessimistic tier, which saturates wherever canopy stands under a
-bounded span (the lower bound is only ~5 m above ground). `confidence`
-is `"measured"` (conductor observed over at least half the segment),
-`"robust"` (same tier under both bounds) or `"bound-dependent"`.
-`encroach_*_m2` is the canopy area under the conductors inside the
-clearance envelope. Rows are ordered by what holds even under the
-optimistic (upper) conductor bound - encroachment, then strike trees -
-then by the same metrics under the lower bound.
+bound. `frac_observed` and `frac_observed_under` are the shares of the
+grid cells within `coverage_m` and `under_line_m` of the segment (not
+past the line's ends) with an observed terrain and canopy value; cells
+off the edge of the data count as unobserved, structure-masked cells as
+observed (known structures, not gaps). `priority` is the tier under the
+optimistic (upper) bound, i.e. what holds even if the conductor is as
+high as plausible; `priority_lo` is the pessimistic tier, which
+saturates wherever canopy stands under a bounded span (the lower bound
+is only ~5 m above ground). Tiers are `"grow-in"`, `"fall-in"`,
+`"no data"` (no risk found, but coverage below `min_observed`) and
+`"none"`. A grow-in or fall-in finding stands even at low coverage,
+though unseen cells could hide a more severe tier. `confidence` is
+`"measured"` (conductor observed over at least half the segment),
+`"robust"` (same tier under both bounds), `"bound-dependent"` or
+`"low coverage"` (`"no data"` under both bounds). `encroach_*_m2` is the
+canopy area under the conductors inside the clearance envelope. Rows are
+ordered by what holds even under the optimistic (upper) conductor
+bound - encroachment, then strike trees - then by the same metrics under
+the lower bound.

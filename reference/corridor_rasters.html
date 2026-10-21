@@ -65,7 +65,8 @@ conductor's height - zero clearance by construction.</p>
 <span>  below_m <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  min_linearity <span class="op">=</span> <span class="fl">0.6</span>,</span>
 <span>  gap_m <span class="op">=</span> <span class="fl">1.5</span>,</span>
-<span>  drop <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  drop <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  void_m <span class="op">=</span> <span class="fl">5</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -111,14 +112,23 @@ suspended.</p></dd>
 
 <dt id="arg-drop">drop<a class="anchor" aria-label="anchor" href="#arg-drop"></a></dt>
 <dd><p>Optional logical vector over <code>pred</code> rows of points to keep out
-of the canopy model (e.g. vendor-classified buildings).</p></dd>
+of the canopy model (e.g. vendor-classified buildings). These are known
+not to be canopy, so they do not make a cell unobserved.</p></dd>
+
+
+<dt id="arg-void-m">void_m<a class="anchor" aria-label="anchor" href="#arg-void-m"></a></dt>
+<dd><p>Width of the square window (metres) that must contain no
+LiDAR return of any class for a cell to count as a void. Wide enough
+that ordinary point spacing never empties it (3DEP QL2 is &gt;= 2 pts/m^2).</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A list with <code>dtm</code> (ground elevation) and <code>chm</code> (canopy height),
-both <code>SpatRaster</code> in metres, <code>unobserved</code> (logical <code>SpatRaster</code> or
-<code>NULL</code>), and <code>n_conductor_excluded</code>.</p>
+both <code>SpatRaster</code> in metres, <code>unobserved</code> (logical <code>SpatRaster</code>), <code>void</code>
+(logical <code>SpatRaster</code>, the voids alone), <code>n_conductor_excluded</code> and
+<code>n_uncertain_excluded</code> (points left out of the canopy model as uncertain,
+conductor exclusions included).</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -134,10 +144,21 @@ conductor elevation minus <code>below_m</code>) within its 3 x 3 m neighbourhood
 (bundled conductors form ribbons, not lines, so linearity alone misses
 them). A tree crown that reaches wire height has foliage below it and
 stays in the canopy model, as does canopy within <code>gap_m</code> of a conductor
-(which the clearance target flags anyway). Cells that held excluded points and no remaining canopy are
-returned as <code>unobserved</code> (not bare ground). Keep <code>envelope_m</code> no wider
+(which the clearance target flags anyway). Keep <code>envelope_m</code> no wider
 than the grow-in zone used in <code><a href="assess_risk.html">assess_risk()</a></code>, or tall side trees could
 lose their tops before the fall-in test.</p>
+<p>A cell with no canopy is bare ground only if the LiDAR saw it as such.
+Cells are returned as <code>unobserved</code> (unknown, not bare ground) when either</p><ul><li><p>they held points kept out of the canopy model whose class is uncertain -
+unlabelled points (the margins around wire / structure / building labels
+and abstained near-line candidates), points the classifier and the rules
+disagree on, and conductor-envelope exclusions - and no canopy remains; or</p></li>
+<li><p>they are LiDAR voids: no return of any class within a <code>void_m</code> square
+window (missing or truncated tiles, water, dropouts). The TIN terrain
+model interpolates straight across voids, so they would otherwise read as
+bare ground.</p></li>
+</ul><p>Points the rules labelled wire, structure or building are not uncertain:
+a wire label requires an observed air gap beneath it, and structures and
+buildings are not canopy.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

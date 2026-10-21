@@ -266,8 +266,14 @@ OSM lines (Overpass) ─┘                │
 <li>suspended: nothing in the 1.5 m layer just beneath the conductor band across a 3×3 m neighbourhood. Bundled 500 kV conductors form ribbons rather than lines, so this second test matters.</li>
 </ul>
 <p>A crown that reaches wire height has foliage beneath it and stays, so it is still flagged. The envelope comes from where conductor returns actually are and is capped at the grow-in zone, so tall trees beside the line keep their tops for the fall-in test. Cells emptied by the removal are treated as unobserved, not bare ground.</p>
+<p><strong>Unseen is not clear.</strong> A cell with no canopy counts as bare ground only if the LiDAR saw it. Two kinds of cell are unobserved instead:</p>
+<ul>
+<li>cells whose only above-ground returns were left out of the canopy model as uncertain: the unlabelled margins beside wires, structures and buildings, abstained near-line candidates, points the classifier and rules disagree on, and conductor-envelope removals;</li>
+<li>voids with no return of any class within 5 m, such as a missing tile, water or a dropout. The TIN terrain model bridges these, so without the check they would read as bare ground.</li>
+</ul>
+<p>Each segment reports <code>frac_observed</code> (across the corridor) and <code>frac_observed_under</code> (the grow-in zone). A segment that would be <code>none</code> but has less than 75% of either observed is tiered <code>no data</code> (confidence <code>low coverage</code> when that holds under both bounds), and the risk map draws those grey and dotted. The pipeline also stops if a configured tile is missing from The National Map.</p>
 <p><strong>Fall-in uses 3D geometry and terrain.</strong> A tree pivoting at its base sweeps a sphere of radius <em>h</em>. It can strike if the 3D distance from its base to the nearest conductor point (DTM at the tree, modelled conductor elevation, measured outer-phase offset) is ≤ <em>h</em>. Trees inside the grow-in zone count as grow-in, not strike.</p>
-<p><strong>Structures are masked.</strong> Towers, H-frames and crossarms otherwise look like tall trees under the conductors. Cells within a structure-sized radius of OSM structure nodes and line vertices (for every circuit in the corridor) are treated as unobserved, and features one or two cells wide are removed with a 3×3 crown-support filter.</p>
+<p><strong>Structures are masked.</strong> Towers, H-frames and crossarms otherwise look like tall trees under the conductors. Cells within a structure-sized radius of OSM structure nodes and line vertices (for every circuit in the corridor) are masked (known structures: not scored, but not counted as data gaps), and features one or two cells wide are removed with a 3×3 crown-support filter.</p>
 <p><strong>LiDAR says where canopy has grown in; Landsat says how green and wet it is.</strong> The grow-in screen ranks canopy by its distance to the conductor, not by how readily it would carry fire to the line. An optional Landsat step adds that:</p>
 <ul>
 <li>
@@ -327,6 +333,8 @@ OSM lines (Overpass) ─┘                │
 <strong>3 robust grow-in candidates.</strong> The top one (about 1.01–1.06 km along the line, conductor measured along 41% of it) has a conductor about 15 m up, leaving a low H-frame on the canyon floor, beside riparian cottonwoods up to 27 m tall. The other two have trees of 20–29 m that exceed even the highest plausible conductor. They are the places to verify with imagery or a field visit first.</li>
 <li>
 <strong>27 segments are bound-dependent.</strong> Whether they need work depends on where the conductor actually is, which this acquisition doesn’t show.</li>
+<li>
+<strong>The LiDAR saw the corridor.</strong> Every segment has at least 94% of its corridor and 85% of its grow-in zone observed (median 100%), so none is tiered <code>no data</code>.</li>
 </ul>
 <table class="table">
 <colgroup>
@@ -376,7 +384,7 @@ OSM lines (Overpass) ─┘                │
 <div class="float">
 <img src="reference/figures/sunshine_cross_section.png" alt="Sunshine cross-section"><div class="figcaption">Sunshine cross-section</div>
 </div>
-<p><strong>The grown-in canopy is not the dry canopy.</strong> A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, gives 141 canopy-dominated 30 m pixels in the corridor. 23 of the 30 segments have enough grown-in canopy to rank; NDVI and NDMI agree closely across them (r = 0.89).</p>
+<p><strong>The grown-in canopy is not the dry canopy.</strong> A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, gives 142 canopy-dominated 30 m pixels in the corridor. 23 of the 30 segments have enough grown-in canopy to rank; NDVI and NDMI agree closely across them (r = 0.89).</p>
 <table class="table">
 <colgroup>
 <col width="27%">
@@ -391,13 +399,13 @@ OSM lines (Overpass) ─┘                │
 <tbody>
 <tr>
 <td>0.10–0.15 km, trees to 20 m</td>
-<td align="right">0.36</td>
+<td align="right">0.37</td>
 <td align="right">0.49</td>
 </tr>
 <tr>
 <td>1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate)</td>
 <td align="right">0.50</td>
-<td align="right">0.81</td>
+<td align="right">0.80</td>
 </tr>
 <tr>
 <td>1.06–1.11 km, canyon floor, trees to 29 m</td>
@@ -504,7 +512,7 @@ OSM lines (Overpass) ─┘                │
 <img src="reference/figures/nashville_cv_metrics.png" alt="Nashville cross-validation"><div class="figcaption">Nashville cross-validation</div>
 </div>
 <p>Wires transfer across space here: average precision 0.88 against a no-skill 0.10, and 0.83 even without the height and echo features that encode the labelling rule. Structures (31 lattice towers) still don’t.</p>
-<p><strong>Against the vendor’s classes.</strong> These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can’t show skill: predicting “vegetation” everywhere scores 0.993.</p>
+<p><strong>Against the vendor’s classes.</strong> These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can’t show skill: predicting “vegetation” everywhere scores 0.992.</p>
 <table class="table">
 <colgroup>
 <col width="15%">
@@ -523,28 +531,28 @@ OSM lines (Overpass) ─┘                │
 <tbody>
 <tr>
 <td>always “vegetation” (baseline)</td>
-<td align="right">0.993</td>
+<td align="right">0.992</td>
 <td align="right">0</td>
 <td align="right">0.50</td>
 <td align="right">0</td>
 </tr>
 <tr>
 <td>weak labels</td>
-<td align="right">0.948</td>
+<td align="right">0.950</td>
 <td align="right">0</td>
 <td align="right">0.46</td>
 <td align="right">−0.01</td>
 </tr>
 <tr>
 <td>model trained on weak labels</td>
-<td align="right">0.955</td>
+<td align="right">0.957</td>
 <td align="right">0</td>
-<td align="right">0.46</td>
+<td align="right">0.47</td>
 <td align="right">−0.01</td>
 </tr>
 <tr>
 <td>Colorado model, transferred</td>
-<td align="right">0.993</td>
+<td align="right">0.992</td>
 <td align="right">0</td>
 <td align="right">0.50</td>
 <td align="right">0.00</td>
@@ -553,7 +561,7 @@ OSM lines (Overpass) ─┘                │
 <td><strong>trained on vendor labels (spatial CV)</strong></td>
 <td align="right">0.998</td>
 <td align="right">
-<strong>0.87</strong> (AP 0.95)</td>
+<strong>0.88</strong> (AP 0.95)</td>
 <td align="right">0.89</td>
 <td align="right">—</td>
 </tr>
@@ -561,9 +569,9 @@ OSM lines (Overpass) ─┘                │
 </table>
 <ul>
 <li>
-<strong>On vegetation vs building, the weak-label pipeline has no skill at this site.</strong> OSM maps one building in the corridor, so there are no building labels to learn from. The vendor’s labels would buy a building F1 of 0.87. The weak models’ lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.</li>
+<strong>On vegetation vs building, the weak-label pipeline has no skill at this site.</strong> OSM maps one building in the corridor, so there are no building labels to learn from. The vendor’s labels would buy a building F1 of 0.88. The weak models’ lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.</li>
 <li>
-<strong>The Colorado model doesn’t transfer.</strong> With its own class prior it recalls 0% of Nashville’s conductor returns. Threshold-free, its wire average precision is 0.22 against a 0.10 baseline (the Nashville model: 0.87). Its 0.993 vegetation F1 is exactly the baseline.</li>
+<strong>The Colorado model doesn’t transfer.</strong> With its own class prior it recalls 0% of Nashville’s conductor returns. Threshold-free, its wire average precision is 0.22 against a 0.10 baseline (the Nashville model: 0.87). Its 0.992 vegetation F1 is exactly the baseline.</li>
 </ul>
 <p><strong>Risk screen.</strong> The same segments, with three different canopy models:</p>
 <table class="table">
@@ -607,6 +615,8 @@ OSM lines (Overpass) ─┘                │
 <li>
 <strong>No grow-in.</strong> The managed right-of-way is clear under the conductors.</li>
 <li>
+<strong>The 32 clear segments were seen, not assumed.</strong> Every segment has at least 91% of its corridor and of its grow-in zone observed (median 99%), so none is tiered <code>no data</code>. The lowest segment (0.36–0.41 km, 91% under the line) is still 16 points above the 75% threshold.</li>
+<li>
 <strong>24 strike trees across 7 segments,</strong> 28–39 m from the centreline, the same under both bounds because the conductor is measured. They are the list to verify.</li>
 <li>
 <strong>The conductor envelope has to cover every phase.</strong> An earlier run capped it at 15 m while one outer phase sits up to ~19 m from the OSM centreline. That left outer-phase returns in the canopy model, which showed up as 2 grow-in segments and 4 extra strike trees at the envelope edge. Widening the grow-in zone to 21 m removed all of them.</li>
@@ -623,6 +633,8 @@ OSM lines (Overpass) ─┘                │
 <strong>Weak labels.</strong> Wire and structure accuracy is agreement with the labelling rules. Nashville’s vendor classes give real ground truth for vegetation and buildings only, and they themselves misclassify conductors. A hand-labelled test set (e.g. in CloudCompare) is the next step.</li>
 <li>
 <strong>Bounds rest on assumptions.</strong> Attachment heights are capped (20 m for the H-frames, 45 m for the lattice towers), and every support is assumed to be an OSM vertex or tagged node. A taller or unmapped structure would invalidate the upper bound locally.</li>
+<li>
+<strong>Wire labels are trusted.</strong> A wire label requires an observed air gap beneath it, so cells holding only wire-labelled returns count as observed bare ground. A thin branch layer within the label’s 4 m layer under a conductor can join the wire label and drop out of the canopy model.</li>
 <li>
 <strong>Conductor removal is a judgement.</strong> Canopy within ~1.5 m beneath a conductor can’t be told apart from a conductor over dense canopy; both are kept as canopy and flagged as grow-in, which is the conservative choice.</li>
 <li>
