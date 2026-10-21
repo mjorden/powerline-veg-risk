@@ -12,7 +12,8 @@ plot_cross_section(
   file = NULL,
   at = 0.5,
   width_m = 4,
-  half_len_m = 40
+  half_len_m = 40,
+  line_id = NULL
 )
 ```
 
@@ -46,3 +47,8 @@ plot_cross_section(
 - half_len_m:
 
   Section half-length (metres, across the line).
+
+- line_id:
+
+  Which merged line of a multi-line corridor to cut; the first by
+  default, with a message when others exist.

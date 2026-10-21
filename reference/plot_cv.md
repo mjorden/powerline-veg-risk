@@ -1,6 +1,10 @@
 # Cross-validation metrics: spatial-block vs random folds
 
-Cross-validation metrics: spatial-block vs random folds
+Schemes are offset within each class row so none hides another; colours
+are keyed by scheme name (a subset keeps its colours) and unknown
+schemes are kept, drawn neutral, with a warning. Average precision below
+0.01 is printed to two significant figures, so 0.004 never reads as
+0.00.
 
 ## Usage
 
