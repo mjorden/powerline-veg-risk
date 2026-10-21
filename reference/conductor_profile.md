@@ -93,7 +93,12 @@ conductor_profile(
 ## Value
 
 data.frame of vertices: `line_id`, `x`, `y`, `tx`, `ty` (unit tangent
-along the line), `s_m`, `seg_id`, `ground`, `z_lo`, `z_hi`, `src`.
+along the line), `s_m`, `seg_id`, `ground`, `z_lo`, `z_hi`, `src`. The
+attribute `bins` is a data frame with one row per line counting the
+chainage bins that held conductor returns (`n_bins`) and how many each
+sanity check rejected (`n_too_few`, `n_below_floor`, `n_implausible`),
+with `n_measured` the bins that survived, so a profile that silently
+lost most of its returns can be told from one that never had them.
 
 ## Details
 

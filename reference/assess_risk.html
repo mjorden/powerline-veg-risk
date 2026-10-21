@@ -17,7 +17,14 @@ conductor_profile() (identical where the conductor is measured)."></head><body>
     </button>
 
     <div id="navbar" class="collapse navbar-collapse ms-3">
-      <ul class="navbar-nav me-auto"><li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
+      <ul class="navbar-nav me-auto"><li class="nav-item dropdown">
+  <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/methods.html">How the screen works</a></li>
+    <li><a class="dropdown-item" href="../articles/sunshine-canyon.html">Case study: Sunshine Canyon, Colorado</a></li>
+    <li><a class="dropdown-item" href="../articles/nashville.html">Case study: West Nashville, Tennessee</a></li>
+    <li><a class="dropdown-item" href="../articles/limits-and-roadmap.html">Limits and roadmap</a></li>
+  </ul></li>
+<li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/mjorden/powerline-veg-risk/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
@@ -161,10 +168,13 @@ cannot be claimed where the LiDAR did not see the ground.</p></dd>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>A list: <code>segments</code> (<code>sf</code>, one row per segment) and <code>trees</code> (<code>sf</code>
-treetops: <code>seg_id</code>, <code>height_m</code>, <code>dh_m</code> horizontal distance to the
-nearest conductor, <code>reach_lo_m</code> / <code>reach_hi_m</code> the height a tree there
-needs to reach the conductor under each bound, <code>strike_lo</code> /
-<code>strike_hi</code> / <code>strike</code> whether it does). Columns ending <code>_lo</code> / <code>_hi</code>
+treetops: <code>tree_id</code> (the treetop's position to 0.1 CRS units, stable
+across runs on the same data), <code>seg_id</code>, <code>height_m</code>, <code>dh_m</code> horizontal
+distance to the nearest conductor, <code>reach_lo_m</code> / <code>reach_hi_m</code> the height a tree there
+needs to reach the conductor under each bound (the minimum 3D distance
+to any conductor vertex within reach, less the phase offset),
+<code>dz_lo_m</code> / <code>dz_hi_m</code> the conductor's height above the tree's base at
+that vertex, <code>strike_lo</code> / <code>strike_hi</code> / <code>strike</code> whether it does). Columns ending <code>_lo</code> / <code>_hi</code>
 use the lower / upper conductor bound. <code>frac_observed</code> and <code>frac_observed_under</code> are the shares of the
 grid cells within <code>coverage_m</code> and <code>under_line_m</code> of the segment (not
 past the line's ends) with an observed terrain and canopy value; cells

@@ -1,534 +1,83 @@
-# powerline-veg-risk
-
-**Screening transmission corridors for vegetation risk from public
-airborne LiDAR, in R.**
-
-`vegrisk` is an R package plus two reproducible case studies. It takes
-USGS 3DEP point clouds (LAS/LAZ) and OpenStreetMap power-line geometry
-and produces a segment-by-segment screen for the two vegetation failure
-modes utilities manage:
-
-- **Grow-in:** canopy growing up into the clearance envelope beneath the
-  conductors.
-- **Fall-in:** “strike trees” beside the line that are tall enough to
-  reach a conductor if they fall.
-
-|  | Sunshine Canyon, CO | West Nashville, TN |
-|----|----|----|
-| Line | Sunshine–Boulder Hydro 115 kV, wood H-frames | TVA Maury–Davidson 500 kV, lattice towers, shared right-of-way |
-| Setting | Wildland–urban interface (2010 Fourmile Canyon Fire burned ~2.5 km away) | Wooded hills, managed right-of-way |
-| LiDAR | `CO_DRCOG_2020`, UTM metres, ~35 pts/m² | `TN_DavidsonCounty_D22`, Tennessee State Plane **US survey feet**, ~34 pts/m² |
-| Delivered classes | ground / unclassified / noise only | \+ vegetation (3–5) and buildings (6) |
-| Line length, above-ground points | 1.52 km, 2.26 M | 2.0 km, 1.05 M |
-| Conductor returns found | 914 | 104,181 |
-| Conductor elevation measured along | 2% of the line | **~100%** of the line |
-| Result | Bounded: 3 robust grow-in candidates, 27 segments undecidable | Decisive: no grow-in, 24 strike trees in 7 segments, 32 clear |
-
-## Headline findings
-
-1.  **No public 3DEP project from 2019 on labels power lines.** I
-    sampled the classification of all 641 USGS 3DEP projects from 2019
-    onward in the public Entwine index. None uses the ASPRS wire
-    classes; the few hits for codes 13/14 were topobathy datasets or
-    state-specific reuse (NC Phase 4 uses 13 for roads). Conductor
-    labels have to be derived.
-2.  **Whether public LiDAR can decide grow-in depends on whether it
-    sampled the conductors.** In Colorado it barely did, so the
-    conductor is bounded within a band tens of metres tall and 27 of 30
-    segments stay undecidable. In Nashville, the 500 kV bundles were
-    sampled along almost the whole line, so the same pipeline gives a
-    measured, decisive screen.
-3.  **Vendor vegetation classes contain the conductors.** In Nashville,
-    99.3% of conductor returns (103,449 points, 15–45 m up) are
-    delivered as *high vegetation*. A canopy model built straight from
-    the delivered classes flags **every one** of the 39 segments as
-    grow-in; with conductor returns removed, none are.
-4.  **Random cross-validation on point clouds misleads.** Random folds
-    report a Colorado wire average precision of 0.21; 100 m spatial
-    blocks report 0.003. A model trained in Colorado doesn’t transfer to
-    Nashville (wire recall 0).
-
-![Nashville risk map](reference/figures/nashville_risk_map.png)
-
-Nashville risk map
-
-## Pipeline
-
-    3DEP tiles (TNM API) ─┐
-                          ├─ clip to corridor ─ height-normalise (TIN on class 2)
-    OSM lines (Overpass) ─┘                │
-                                           ▼
-              per-point features: multi-scale eigenvalue shape (k = 10, 30),
-              echo structure, intensity percentile, height
-                                           │
-              weak labels from GIS + geometry (3DEP has no wire classes)
-                                           │
-              random forest (ranger), class-weighted, prior-corrected;
-              spatially blocked CV vs random CV; feature ablation;
-              vendor-class ground truth where it exists
-                                           │
-              conductor elevation: measured where seen, bounded elsewhere
-                                           │
-              canopy model from consensus vegetation, conductor returns removed
-                                           │
-              per 50 m segment: clearance encroachment + 3D strike trees
-              under both conductor bounds, with a confidence label
-
-| Step | Function | File |
-|----|----|----|
-| Find / download 3DEP tiles, fetch OSM layers | [`tnm_lidar_tiles()`](https://mjorden.github.io/powerline-veg-risk/reference/tnm_lidar_tiles.md), [`download_tiles()`](https://mjorden.github.io/powerline-veg-risk/reference/download_tiles.md), [`osm_power_lines()`](https://mjorden.github.io/powerline-veg-risk/reference/osm_power_lines.md), [`osm_power_structures()`](https://mjorden.github.io/powerline-veg-risk/reference/osm_power_structures.md), [`osm_buildings()`](https://mjorden.github.io/powerline-veg-risk/reference/osm_buildings.md) | [R/fetch.R](https://mjorden.github.io/powerline-veg-risk/R/fetch.R) |
-| Corridor clip, noise removal, height normalisation, CRS-unit safety | [`read_corridor()`](https://mjorden.github.io/powerline-veg-risk/reference/read_corridor.md), [`line_corridor()`](https://mjorden.github.io/powerline-veg-risk/reference/line_corridor.md), [`las_m_per_unit()`](https://mjorden.github.io/powerline-veg-risk/reference/las_m_per_unit.md) | [R/preprocess.R](https://mjorden.github.io/powerline-veg-risk/R/preprocess.R) |
-| Point features | [`point_features()`](https://mjorden.github.io/powerline-veg-risk/reference/point_features.md) | [R/features.R](https://mjorden.github.io/powerline-veg-risk/R/features.R) |
-| Weak labels | [`weak_labels()`](https://mjorden.github.io/powerline-veg-risk/reference/weak_labels.md) | [R/labels.R](https://mjorden.github.io/powerline-veg-risk/R/labels.R) |
-| Classifier and validation | [`train_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/train_point_classifier.md), [`cv_point_classifier()`](https://mjorden.github.io/powerline-veg-risk/reference/cv_point_classifier.md), [`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md), [`predict_points()`](https://mjorden.github.io/powerline-veg-risk/reference/predict_points.md), [`evaluate_vendor_classes()`](https://mjorden.github.io/powerline-veg-risk/reference/evaluate_vendor_classes.md) | [R/classify.R](https://mjorden.github.io/powerline-veg-risk/R/classify.R) |
-| Conductor model and risk | [`conductor_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/conductor_profile.md), [`corridor_rasters()`](https://mjorden.github.io/powerline-veg-risk/reference/corridor_rasters.md), [`assess_risk()`](https://mjorden.github.io/powerline-veg-risk/reference/assess_risk.md) | [R/risk.R](https://mjorden.github.io/powerline-veg-risk/R/risk.R) |
-| Dry-season canopy greenness and moisture (optional) | [`landsat_scenes()`](https://mjorden.github.io/powerline-veg-risk/reference/landsat_scenes.md), [`landsat_composite()`](https://mjorden.github.io/powerline-veg-risk/reference/landsat_composite.md), [`canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/canopy_dryness.md) | [R/landsat.R](https://mjorden.github.io/powerline-veg-risk/R/landsat.R) |
-| Fire-weather wind: windward strike trees, forecast watchlist (optional) | [`wind_history()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_history.md), [`fire_wind_hours()`](https://mjorden.github.io/powerline-veg-risk/reference/fire_wind_hours.md), [`wind_fall_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_fall_exposure.md), [`nws_forecast()`](https://mjorden.github.io/powerline-veg-risk/reference/nws_forecast.md), [`nws_alerts()`](https://mjorden.github.io/powerline-veg-risk/reference/nws_alerts.md), [`forecast_watchlist()`](https://mjorden.github.io/powerline-veg-risk/reference/forecast_watchlist.md) | [R/wind.R](https://mjorden.github.io/powerline-veg-risk/R/wind.R) |
-| Figures | [`plot_risk_map()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_risk_map.md), [`plot_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_profile.md), [`plot_cross_section()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cross_section.md), [`plot_cv()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_cv.md), [`plot_importance()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_importance.md), [`plot_canopy_dryness()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_canopy_dryness.md), [`plot_wind_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_wind_exposure.md) | [R/plot.R](https://mjorden.github.io/powerline-veg-risk/R/plot.R) |
-| Case studies | `run_case_study(cfg)` + one config script per site | [analysis/](https://mjorden.github.io/powerline-veg-risk/analysis/) |
-
-## Design decisions worth reading
-
-**Distances are always metres.** Point clouds stay in their native CRS,
-and every parameter is converted with
-[`las_m_per_unit()`](https://mjorden.github.io/powerline-veg-risk/reference/las_m_per_unit.md).
-The Nashville tiles are in US survey feet; without the conversion every
-buffer would silently shrink 3.28×. Geographic CRSs are rejected.
-
-**Labels are weak, and the code says so.** Training labels come from:
-
-- **building:** OSM footprints, shrunk 1 m inward so crowns overhanging
-  eaves don’t count as roof.
-- **structure:** OSM pole and tower nodes.
-- **wire:** an air-gap test (an elevated layer with empty space beneath
-  it across a 3×3 m window) plus an **along-line run test** in
-  chainage/offset coordinates: each conductor row must extend ≥ 12 m
-  along *any* mapped line in the area, so second circuits on a shared
-  right-of-way are labelled too. Crown tops are compact and fail.
-- **vegetation:** everything else.
-
-Elevated suspended candidates that fail the wire test, or that lie
-beyond `wire_search_m` of any mapped line, **abstain** (NA) rather than
-becoming “vegetation”, so missed and unmapped conductors aren’t taught
-as trees. The mapped lines include OSM `power=minor_line` (distribution)
-as well as `power=line`.
-
-**Validation is spatial, and the gap is reported.** Folds are 100 m
-spatial blocks; random folds are reported alongside. Precision is
-measured at real class prevalence, and the headline metric is average
-precision against its no-skill value. An ablation drops the features
-that encode the labelling rule (height, echo structure).
-
-**Class weighting is undone at prediction time.** The forest trains with
-inverse-frequency case weights, i.e. under equal priors;
-[`classify_probs()`](https://mjorden.github.io/powerline-veg-risk/reference/classify_probs.md)
-multiplies by the true prevalence and renormalises. Without that, the
-Colorado model called about 25,000 vegetation points “wire”.
-
-**Conductor elevation is bounded, not guessed.**
-[`conductor_profile()`](https://mjorden.github.io/powerline-veg-risk/reference/conductor_profile.md)
-uses classified conductor returns where they pass sanity checks: more
-than one mask radius from a structure (guy wires and crossarms are
-linear too), a robust low quantile per 5 m bin, above the code minimum,
-and at a plausible slope to neighbouring bins. Elsewhere it brackets the
-conductor:
-
-- **lower bound:** ground + NESC minimum clearance.
-- **upper bound:** the chord between the supports either side, at
-  ground + a maximum attachment height. A conductor sags below the chord
-  between its attachments. Where the next support lies outside the data,
-  the upper bound is reported as unknown.
-
-Every risk metric is computed under both bounds, and each segment is
-labelled `measured`, `robust` (same answer under both bounds) or
-`bound-dependent`.
-
-**Conductor returns are removed from the canopy model, but trees are
-not.** Conductors that cross canopy aren’t “suspended”, so the rules
-label them vegetation, and they would put “trees” at wire height under
-the whole line.
-[`corridor_rasters()`](https://mjorden.github.io/powerline-veg-risk/reference/corridor_rasters.md)
-removes points inside the conductor envelope at or above the measured
-conductor elevation only if they are wire-like:
-
-- locally linear, or
-- suspended: nothing in the 1.5 m layer just beneath the conductor band
-  across a 3×3 m neighbourhood. Bundled 500 kV conductors form ribbons
-  rather than lines, so this second test matters.
-
-A crown that reaches wire height has foliage beneath it and stays, so it
-is still flagged. The envelope comes from where conductor returns
-actually are and is capped at the grow-in zone, so tall trees beside the
-line keep their tops for the fall-in test. Cells emptied by the removal
-are treated as unobserved, not bare ground.
-
-**Unseen is not clear.** A cell with no canopy counts as bare ground
-only if the LiDAR saw it. Two kinds of cell are unobserved instead:
-
-- cells whose only above-ground returns were left out of the canopy
-  model as uncertain: the unlabelled margins beside wires, structures
-  and buildings, abstained near-line candidates, points the classifier
-  and rules disagree on, and conductor-envelope removals;
-- voids with no return of any class within 5 m, such as a missing tile,
-  water or a dropout. The TIN terrain model bridges these, so without
-  the check they would read as bare ground.
-
-Each segment reports `frac_observed` (across the corridor) and
-`frac_observed_under` (the grow-in zone). A segment that would be `none`
-but has less than 75% of either observed is tiered `no data` (confidence
-`low coverage` when that holds under both bounds), and the risk map
-draws those grey and dotted. The pipeline also stops if a configured
-tile is missing from The National Map.
-
-**Fall-in uses 3D geometry and terrain.** A tree pivoting at its base
-sweeps a sphere of radius *h*. It can strike if the 3D distance from its
-base to the nearest conductor point (DTM at the tree, modelled conductor
-elevation, measured outer-phase offset) is ≤ *h*. Trees inside the
-grow-in zone count as grow-in, not strike.
-
-**Structures are masked.** Towers, H-frames and crossarms otherwise look
-like tall trees under the conductors. Cells within a structure-sized
-radius of OSM structure nodes and line vertices (for every circuit in
-the corridor) are masked (known structures: not scored, but not counted
-as data gaps), and features one or two cells wide are removed with a 3×3
-crown-support filter.
-
-**LiDAR says where canopy has grown in; Landsat says how green and wet
-it is.** The grow-in screen ranks canopy by its distance to the
-conductor, not by how readily it would carry fire to the line. An
-optional Landsat step adds that:
-
-- **Data:** Landsat 8/9 Collection 2 Level-2 surface reflectance, from
-  the Microsoft Planetary Computer STAC API (no key needed). Only the
-  corridor window of each cloud-optimised GeoTIFF is read.
-- **Composite:** a per-pixel median over every clear dry-season
-  observation in the chosen years. `QA_PIXEL` masks fill, cloud, dilated
-  cloud, cirrus, shadow, snow and water. Water is masked because its
-  negative NDVI would read as very dry canopy. Two indices come out:
-  **NDVI** (greenness) and **NDMI** (NIR against SWIR1: canopy water
-  content, the closer of the two to fuel moisture).
-- **LiDAR picks the pixels.** A 30 m pixel is wider than many
-  rights-of-way, so most pixels mix trees with cleared ground. Each
-  pixel gets a canopy fraction from the 1 m CHM, and pixels under 50%
-  canopy are not scored. A segment’s value is the mean of its pixels,
-  weighted by how many of the segment’s canopy cells *inside the grow-in
-  zone* fall in each one. It describes the trees under the wires, not
-  the forest beside them.
-- **Relative, not absolute.** Neither index has a fire-danger threshold.
-  Each segment is ranked against every canopy pixel in the corridor, and
-  `dry_canopy` marks the lowest quarter. `dry_grow_in` is dry *and*
-  grown in under the optimistic conductor bound; `dry_grow_in_lo` uses
-  the pessimistic tier.
-
-**Weather can’t tell segments apart, but wind direction can.**
-Fire-weather grids are 2.5–25 km wide, so every segment of a short line
-gets the same wind. The spatial signal comes from combining wind
-*direction* with where each strike tree stands. Windthrown trees fall
-roughly downwind, so a tree on the upwind side of the line in dry,
-high-wind hours matters more than the same tree on the downwind side.
-
-- **Fire-weather hours:** ten years of hourly ERA5 reanalysis
-  (Open-Meteo, no key). Hours count as fire weather when gusts are in
-  the record’s top 5% and relative humidity is ≤ 30%.
-- **Hitting arc, from the existing reach test.** A tree of height *h*,
-  with its base a horizontal distance *d* from the outer phase and the
-  conductor *dz* above its base, reaches horizontally *R* = √(*h*² −
-  *dz*²) at conductor height. It hits if it falls within acos(*d*/*R*)
-  of straight at the line. There is no arbitrary angle cutoff, apart
-  from a ±15° allowance for the scatter of real fall directions.
-- **Per tree:** the share of fire-weather hours whose wind would throw
-  it into that arc (`wind_hit_lo` / `wind_hit_hi`). **Per segment:** the
-  windward strike-tree count, and the expected number thrown towards the
-  line in a fire-weather hour. Wind directions are rotated from true to
-  grid north first.
-- **Forecast watchlist:** `analysis/watchlist.R` applies the same
-  thresholds and geometry to the live NWS 7-day hourly forecast and
-  active Red Flag Warnings. It lists the segments whose strike trees the
-  coming winds would throw, plus dry grown-in segments, and when.
-
-## Case study 1: Sunshine Canyon, Colorado
-
-![Sunshine conductor
-profile](reference/figures/sunshine_conductor_profile.png)
-
-Sunshine conductor profile
-
-**The conductor is barely sampled.** After the sanity checks, conductor
-returns survive along 2% of the line, and spans run 257–468 m between
-H-frames across a 250 m descent into the canyon. Along 22% of the line
-the next support is outside the data, so there is no upper bound at all.
-
-|  | optimistic conductor (upper bound) | pessimistic conductor (code minimum) |
-|----|----|----|
-| segments with ≥ 5 m² of canopy in the clearance envelope | **3 of 30** | 28 of 30 |
-| potential strike trees | 19 | 307 |
-
-- **3 robust grow-in candidates.** The top one (about 1.01–1.06 km along
-  the line, conductor measured along 41% of it) has a conductor about 15
-  m up, leaving a low H-frame on the canyon floor, beside riparian
-  cottonwoods up to 27 m tall. The other two have trees of 20–29 m that
-  exceed even the highest plausible conductor. They are the places to
-  verify with imagery or a field visit first.
-- **27 segments are bound-dependent.** Whether they need work depends on
-  where the conductor actually is, which this acquisition doesn’t show.
-- **The LiDAR saw the corridor.** Every segment has at least 94% of its
-  corridor and 85% of its grow-in zone observed (median 100%), so none
-  is tiered `no data`.
-
-| class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
-|----|---:|---:|---:|---:|---:|
-| building | 3,608 | 0.0016 | 0.45 | 0.82 | 0.55 |
-| structure | 1,602 | 0.0007 | 0.011 | 0.41 | 0.008 |
-| wire | 914 | 0.0004 | 0.003 | 0.21 | 0.004 |
-
-With only a few hundred metres of labelled conductor and five
-structures, wires and structures don’t generalise across space here.
-Random folds would have hidden that.
-
-![Sunshine cross-section](reference/figures/sunshine_cross_section.png)
-
-Sunshine cross-section
-
-**The grown-in canopy is not the dry canopy.** A dry-season
-(July–September) median of 25 Landsat 8 scenes from 2019–2021,
-bracketing the 2020 flight, covers the corridor with 266 pixels. Only 63
-are scored: 99 are under half canopy, and 104, mostly along the corridor
-edge and inside the bend, are less than 80% observed by the LiDAR, so
-their reflectance would describe land outside the clip. 15 of the 30
-segments rest on at least two scored pixels and 5 m² of grown-in canopy
-and get a percentile; the others keep their index but aren’t ranked.
-NDVI and NDMI agree closely across the ranked segments (r = 0.87).
-
-| robust grow-in candidate | scored pixels | NDVI percentile | NDMI percentile |
-|----|---:|---:|---:|
-| 0.10–0.15 km, trees to 20 m | 3 | 0.76 | 0.68 |
-| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 1 | not ranked | not ranked |
-| 1.06–1.11 km, canyon floor, trees to 29 m | 3 | 0.90 | 0.95 |
-
-- **Neither ranked grow-in candidate is dry;** both sit in the greener
-  half of the corridor, and the 1.06–1.11 km segment is among the
-  wettest canopy on the line (riparian trees on the canyon floor). The
-  top candidate at 1.01–1.06 km can’t be ranked: its riparian strip
-  fills only one scored pixel, and one mixed 30 m pixel can’t carry a
-  percentile.
-- **The 2 driest segments** (lowest NDVI quarter: 0.05–0.10 and
-  0.46–0.51 km) are both bound-dependent: grow-in only if the conductor
-  is at the code minimum. If the conductor turns out to be low there,
-  encroachment and dry fuel coincide, so these come first among the 27
-  undecidable segments.
-
-![Sunshine canopy
-dryness](reference/figures/sunshine_canopy_dryness.png)
-
-Sunshine canopy dryness
-
-**Fire-weather winds come from one direction, and that splits the strike
-trees in two.** Over 2015–2024 there were 609 fire-weather hours (gusts
-≥ 15.2 m/s, RH ≤ 30%), two-thirds of them in October–December. 94% came
-from the west: the Front Range downslope winds behind the 2021 Marshall
-Fire. The line runs south-west to north-east, so those winds blow trees
-west of it towards the conductors and trees east of it away.
-
-|  | potential strike trees | windward (≥ 50% of fire-weather hours) | expected thrown towards the line per fire-weather hour |
-|----|---:|---:|---:|
-| pessimistic conductor (code minimum) | 307 | 126 | 127 |
-| optimistic conductor (upper bound) | 19 | 10 | 10 |
-
-- **The split is close to all-or-nothing.** Windward trees are hit in
-  95% of fire-weather hours on average; the median leeward tree is hit
-  in 1%.
-- **Under the optimistic bound, the top grow-in candidate also has the
-  most windward strike trees:** 7 of its 13, at 1.01–1.06 km. It is the
-  segment to verify first on both counts.
-- **The two dry segments** (0.05–0.10 and 0.46–0.51 km) have 14 and 8
-  potential strike trees under the pessimistic bound, of which 4 and 2
-  are windward.
-
-![Sunshine wind exposure](reference/figures/sunshine_wind_exposure.png)
-
-Sunshine wind exposure
-
-## Case study 2: West Nashville, Tennessee
-
-![Nashville conductor
-profile](reference/figures/nashville_conductor_profile.png)
-
-Nashville conductor profile
-
-**The conductor is measured along the whole line.** The 500 kV bundles
-were well sampled: 104,181 conductor returns, three phases at about −12,
-0 and +12 m, and a second circuit sharing the right-of-way at +30–45 m.
-The profile shows clean catenaries between towers, about 15–45 m above
-the ground (median 24 m).
-
-**Classifier against weak labels (spatial blocks):**
-
-| class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
-|----|---:|---:|---:|---:|---:|
-| wire | 104,181 | 0.10 | **0.89** | 0.95 | 0.83 |
-| structure | 4,262 | 0.004 | 0.03 | 0.26 | 0.02 |
-
-![Nashville
-cross-validation](reference/figures/nashville_cv_metrics.png)
-
-Nashville cross-validation
-
-Wires transfer across space here: average precision 0.89 against a
-no-skill 0.10, and 0.83 even without the height and echo features that
-encode the labelling rule. Structures (31 lattice towers) still don’t.
-
-**Against the vendor’s classes.** These are independent of the weak
-labels. A geometric conductor zone (inside the measured conductor
-envelope, within 3 m of the conductor or above) is excluded from scoring
-for every method alike, because the vendor put conductors in vegetation.
-Vegetation is 98.5% of the scored points, so its F1 can’t show skill:
-predicting “vegetation” everywhere scores 0.992.
-
-|  | vegetation F1 | building F1 | balanced accuracy | Cohen’s κ |
-|----|---:|---:|---:|---:|
-| always “vegetation” (baseline) | 0.992 | 0 | 0.50 | 0 |
-| weak labels | 0.950 | 0 | 0.46 | 0.07 |
-| model trained on weak labels | 0.957 | 0 | 0.47 | −0.01 |
-| Colorado model, transferred | 0.992 | 0 | 0.50 | 0.00 |
-| **trained on vendor labels (spatial CV)** | 0.998 | **0.87** (AP 0.95) | 0.89 | — |
-
-- **On vegetation vs building, the weak-label pipeline has no skill at
-  this site.** OSM maps one building in the corridor, so there are no
-  building labels to learn from. The vendor’s labels would buy a
-  building F1 of 0.87. The weak models’ lower vegetation recall is
-  mostly second-circuit conductors and abstentions, which the vendor
-  also calls vegetation.
-- **The Colorado model doesn’t transfer.** With its own class prior it
-  recalls 0% of Nashville’s conductor returns. Threshold-free, its wire
-  average precision is 0.23 against a 0.10 baseline (the Nashville
-  model: 0.86). Its 0.992 vegetation F1 is exactly the baseline.
-
-**Risk screen.** The same segments, with three different canopy models:
-
-| canopy model | grow-in | fall-in | clear |
-|----|---:|---:|---:|
-| vendor vegetation classes, as delivered | 39 | 0 | 0 |
-| vendor vegetation + this package’s conductor removal | 0 | 9 | 30 |
-| **this package** (consensus vegetation + conductor removal) | **0** | **7** | **32** |
-
-- **The delivered classes would send crews to every span.** Removing
-  conductor returns is the whole grow-in correction (39 → 0). Consensus
-  labelling (model and weak rules agreeing on vegetation, vendor
-  buildings removed) then trims fall-in from 9 segments to 7.
-- **No grow-in.** The managed right-of-way is clear under the
-  conductors.
-- **The 32 clear segments were seen, not assumed.** Every segment has at
-  least 91% of its corridor and of its grow-in zone observed (median
-  99%), so none is tiered `no data`. The lowest segment (0.36–0.41 km,
-  91% under the line) is still 16 points above the 75% threshold.
-- **24 strike trees across 7 segments,** 28–39 m from the centreline,
-  the same under both bounds because the conductor is measured. They are
-  the list to verify.
-- **The conductor envelope has to cover every phase.** An earlier run
-  capped it at 15 m while one outer phase sits up to ~19 m from the OSM
-  centreline. That left outer-phase returns in the canopy model, which
-  showed up as 2 grow-in segments and 4 extra strike trees at the
-  envelope edge. Widening the grow-in zone to 21 m removed all of them.
-
-![Nashville
-cross-section](reference/figures/nashville_cross_section.png)
-
-Nashville cross-section
-
-## Limitations
-
-- **Weak labels.** Wire and structure accuracy is agreement with the
-  labelling rules. Nashville’s vendor classes give real ground truth for
-  vegetation and buildings only, and they themselves misclassify
-  conductors. A hand-labelled test set (e.g. in CloudCompare) is the
-  next step.
-- **Bounds rest on assumptions.** Attachment heights are capped (20 m
-  for the H-frames, 45 m for the lattice towers), and every support is
-  assumed to be an OSM vertex or tagged node. A taller or unmapped
-  structure would invalidate the upper bound locally.
-- **Wire labels are trusted.** A wire label requires an observed air gap
-  beneath it, so cells holding only wire-labelled returns count as
-  observed bare ground. A thin branch layer within the label’s 4 m layer
-  under a conductor can join the wire label and drop out of the canopy
-  model.
-- **Conductor removal is a judgement.** Canopy within ~1.5 m beneath a
-  conductor can’t be told apart from a conductor over dense canopy; both
-  are kept as canopy and flagged as grow-in, which is the conservative
-  choice.
-- **Second circuits** are labelled and their towers masked, but only the
-  study line gets a conductor profile; second-circuit returns over
-  canopy can remain in the canopy model beyond the study line’s
-  envelope.
-- **Conductors OSM doesn’t map** (telecom and communication lines,
-  unmapped circuits) are not labelled wire. Where they hang free they
-  abstain and stay out of the canopy model; where they cross canopy they
-  look like foliage and are kept as canopy, like any conductor over a
-  crown.
-- **OSM geometry** is volunteer-digitised. Conductor envelopes are sized
-  from where returns actually are, not from the centreline alone.
-- **The structure mask** hides canopy close to each support, so strike
-  trees right beside structures are not scored.
-- **Treetops from a CHM** (local maxima, 5 m window) merge or split
-  crowns in dense stands.
-- **Vertical units** are assumed to match horizontal units (true for
-  both deliveries: metres/metres and US survey feet/US survey feet).
-- **Landsat greenness is not fuel moisture.** Low NDVI over canopy can
-  also mean thin, trimmed or leaf-off crowns, and a 30 m pixel always
-  mixes the right-of-way with its edges. `dry_canopy` ranks segments
-  within one corridor and one composite. It can’t be compared across
-  sites or seasons, and it is not a fire-danger rating.
-- **Reanalysis wind is regional.** ERA5 resolves the synoptic flow at
-  10–25 km, not channelling along a canyon or speed-up over a ridge, and
-  its gusts are a model diagnostic. The watchlist applies thresholds
-  from that record to NWS forecast gusts, which are a different product,
-  so treat the gust threshold as a starting point to tune per site.
-  Trees are assumed to fall downwind, within ±15°; trees that break or
-  lean, or limbs, can do otherwise.
+# vegrisk
+
+**Which trees threaten a power line? A screen from public airborne
+LiDAR, in R.**
+
+`vegrisk` turns USGS 3DEP point clouds and OpenStreetMap line geometry
+into a segment-by-segment screen for the two vegetation failure modes
+utilities manage: canopy growing into the clearance envelope
+(**grow-in**) and trees tall enough to reach a conductor if they fall
+(**fall-in**). Public LiDAR has no wire labels, so the package learns
+them from geometry; the conductor elevation is measured where the LiDAR
+saw the wires and bracketed where it did not, so every finding carries
+its confidence. Optional steps rank the grown-in canopy by dry-season
+greenness (Landsat) and the strike trees by which fire-weather winds
+would throw them into the line (ERA5, NWS).
+
+![Vegetation risk along the Sunshine–Boulder Hydro 115 kV
+line](reference/figures/sunshine_risk_map.png)
+
+Vegetation risk along the Sunshine–Boulder Hydro 115 kV line
+
+## What two corridors showed
+
+1.  **Whether public LiDAR can decide grow-in depends on whether it
+    sampled the conductors.** In Colorado it barely did (2% of the
+    line), so 27 of 30 segments stay undecidable and 3 are robust
+    candidates. In Nashville the 500 kV bundles were sampled end to end,
+    and the same pipeline gives a measured, decisive screen.
+2.  **Vendor vegetation classes contain the conductors.** In Nashville,
+    99.3% of conductor returns are delivered as *high vegetation*. A
+    canopy model built from the delivered classes flags every one of 39
+    segments as grow-in; with conductor returns removed, none are.
+3.  **Random cross-validation on point clouds misleads.** Random folds
+    report a Colorado wire average precision of 0.20; 100 m spatial
+    blocks report 0.005. The Colorado model does not transfer to
+    Nashville.
+4.  **Wind direction splits the strike trees in two.** 97% of Colorado
+    fire-weather hours blow from the west, so the 322 potential strike
+    trees divide into 138 windward of the line and 184 leeward, and the
+    top grow-in candidate also holds the most windward trees.
+
+## Two corridors
+
+|  |  |
+|----|----|
+| ![Sunshine Canyon conductor profile](reference/figures/sunshine_conductor_profile.png) | ![West Nashville conductor profile](reference/figures/nashville_conductor_profile.png) |
+| **Sunshine Canyon, Colorado.** 115 kV on wood H-frames in the wildland–urban interface, 2.5 km from the 2010 Fourmile Canyon Fire. Conductor bounded, not measured: 3 robust grow-in candidates, 27 undecidable segments, 33–322 strike trees depending on the bound. [Case study →](https://mjorden.github.io/powerline-veg-risk/articles/sunshine-canyon.html) | **West Nashville, Tennessee.** TVA 500 kV on lattice towers, LiDAR in US survey feet with vendor classes to check against. Conductor measured along the whole line: no grow-in, 24 strike trees in 7 segments, 32 segments seen to be clear. [Case study →](https://mjorden.github.io/powerline-veg-risk/articles/nashville.html) |
+
+## How it works
+
+3DEP tiles and OSM lines → corridor clip and height normalisation →
+per-point shape, echo and height features → weak labels from GIS and
+geometry → class-weighted random forest with spatially blocked
+cross-validation → conductor elevation measured where seen, bounded
+elsewhere → canopy model with conductor returns removed → per 50 m
+segment, clearance encroachment and 3D strike trees under both bounds,
+with a confidence label. Every distance is metres whatever the CRS;
+unseen ground is never read as clear.
+
+- [How the screen
+  works](https://mjorden.github.io/powerline-veg-risk/articles/methods.html):
+  pipeline, design decisions, data sources, how to reproduce.
+- [Limits and
+  roadmap](https://mjorden.github.io/powerline-veg-risk/articles/limits-and-roadmap.html):
+  what it does not do, and what a next version would change.
+- [Function
+  reference](https://mjorden.github.io/powerline-veg-risk/reference/index.html).
 
 ## Reproduce
 
-``` r
-
-# R >= 4.3
-install.packages(c("lidR", "sf", "terra", "lwgeom", "ranger", "FNN", "data.table",
-                   "httr2", "units", "withr", "ggplot2", "scales", "devtools"))
-```
-
 ``` bash
 Rscript analysis/run_sunshine_canyon.R   # ~0.6 GB of 3DEP LiDAR on first run
-Rscript analysis/run_nashville.R         # ~0.3 GB; uses the Colorado model for the transfer test
-Rscript analysis/watchlist.R sunshine    # live NWS forecast against a finished run (needs `wind` in the config)
-Rscript -e 'devtools::test()'           # unit tests: synthetic geometry + lidR example data, no network
+Rscript analysis/run_nashville.R         # ~0.3 GB; scores the Colorado model here too
+Rscript -e 'devtools::test()'           # synthetic geometry + lidR example data, no network
 ```
 
-Cross-validation is the slow part (minutes on mains power, much longer
-on battery). Set `VEGRISK_REUSE=1` to reuse a site’s saved model and
-validation results and recompute only labels and risk. The OSM layers
-used are cached in `data-raw/<site>/*.geojson`, so reruns are
-reproducible even if OSM changes. Outputs go to `output/<site>/`:
-`segments.gpkg`, `trees.gpkg`, `segments.csv`, `conductor_profile.csv`,
-`cv_metrics.csv`, `summary.rds`. A site config with
-`landsat = list(years, months)` also writes `landsat_composite.tif` and
-`landsat_scenes.csv`; the composite is cached and reused on reruns.
-`wind = list(start, end)` writes and reuses `wind_hourly.csv`; the
-watchlist writes `watchlist.csv`.
-
-## Data
-
-- **LiDAR:** U.S. Geological Survey 3D Elevation Program, public domain:
-  `CO_DRCOG_2020_B20` tiles `w0472n4429`, `w0472n4430`;
-  `TN_DavidsonCounty_D22` tiles `155020`, `155060`, `155100`, `155140`,
-  `169020`.
-- **Power lines, structures, buildings:** © OpenStreetMap contributors,
-  ODbL.
-- **Landsat:** U.S. Geological Survey Landsat 8–9 Collection 2 Level-2
-  surface reflectance, public domain, accessed through the Microsoft
-  Planetary Computer.
-- **Historical wind:** Copernicus ERA5 reanalysis via the
-  [Open-Meteo](https://open-meteo.com/) historical weather API, CC BY
-  4.0.
-- **Forecasts and alerts:** U.S. National Weather Service API
-  (api.weather.gov), public domain.
+Data: USGS 3DEP (public domain), © OpenStreetMap contributors (ODbL),
+USGS Landsat Collection 2 via the Microsoft Planetary Computer,
+Copernicus ERA5 via Open-Meteo (CC BY 4.0), U.S. National Weather
+Service API.
 
 # Package index
 
@@ -631,3 +180,32 @@ watchlist writes `watchlist.csv`.
 - [`plot_wind_exposure()`](https://mjorden.github.io/powerline-veg-risk/reference/plot_wind_exposure.md)
   : Strike trees the fire-weather winds would throw into the line
 
+# Articles
+
+### Method
+
+- [How the screen
+  works](https://mjorden.github.io/powerline-veg-risk/articles/methods.md):
+
+  Pipeline, design decisions and data sources behind the vegetation-risk
+  screen.
+
+- [Limits and
+  roadmap](https://mjorden.github.io/powerline-veg-risk/articles/limits-and-roadmap.md):
+
+  What the screen does not do, what the two reviews found, and what a
+  next version would change.
+
+### Case studies
+
+- [Case study: Sunshine Canyon,
+  Colorado](https://mjorden.github.io/powerline-veg-risk/articles/sunshine-canyon.md):
+
+  A 115 kV line in the wildland-urban interface, where the LiDAR barely
+  sampled the conductor.
+
+- [Case study: West Nashville,
+  Tennessee](https://mjorden.github.io/powerline-veg-risk/articles/nashville.md):
+
+  A 500 kV line whose conductors the LiDAR sampled end to end, with
+  vendor classes to check against.

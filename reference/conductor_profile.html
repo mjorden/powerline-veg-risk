@@ -31,7 +31,14 @@ Elsewhere the conductor is bracketed (src = "bounded"):'></head><body>
     </button>
 
     <div id="navbar" class="collapse navbar-collapse ms-3">
-      <ul class="navbar-nav me-auto"><li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
+      <ul class="navbar-nav me-auto"><li class="nav-item dropdown">
+  <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/methods.html">How the screen works</a></li>
+    <li><a class="dropdown-item" href="../articles/sunshine-canyon.html">Case study: Sunshine Canyon, Colorado</a></li>
+    <li><a class="dropdown-item" href="../articles/nashville.html">Case study: West Nashville, Tennessee</a></li>
+    <li><a class="dropdown-item" href="../articles/limits-and-roadmap.html">Limits and roadmap</a></li>
+  </ul></li>
+<li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
       </ul><ul class="navbar-nav"><li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="../search.json"></form></li>
 <li class="nav-item"><a class="external-link nav-link" href="https://github.com/mjorden/powerline-veg-risk/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
@@ -141,7 +148,12 @@ adjacent measured bins.</p></dd>
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>data.frame of vertices: <code>line_id</code>, <code>x</code>, <code>y</code>, <code>tx</code>, <code>ty</code> (unit
 tangent along the line), <code>s_m</code>, <code>seg_id</code>, <code>ground</code>, <code>z_lo</code>, <code>z_hi</code>,
-<code>src</code>.</p>
+<code>src</code>. The attribute <code>bins</code> is a data frame with one row per line
+counting the chainage bins that held conductor returns (<code>n_bins</code>) and
+how many each sanity check rejected (<code>n_too_few</code>, <code>n_below_floor</code>,
+<code>n_implausible</code>), with <code>n_measured</code> the bins that survived, so a
+profile that silently lost most of its returns can be told from one
+that never had them.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
