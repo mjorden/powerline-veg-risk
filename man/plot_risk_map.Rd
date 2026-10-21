@@ -21,7 +21,7 @@ plot_risk_map(
 
 \item{structures}{OSM structures and line vertices (\code{sf}), optional.}
 
-\item{encroach_limits}{Range of the encroachment ramp (m²). The lower
+\item{encroach_limits}{Range of the encroachment ramp (m^2). The lower
 end is zero; an \code{NA} upper end is the largest value on the map. Set
 both to share one ramp across maps.}
 
