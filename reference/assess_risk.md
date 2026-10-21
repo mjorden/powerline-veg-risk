@@ -141,9 +141,12 @@ is only ~5 m above ground). Tiers are `"grow-in"`, `"fall-in"`,
 `"no data"` (no risk found, but coverage below `min_observed`) and
 `"none"`. A grow-in or fall-in finding stands even at low coverage,
 though unseen cells could hide a more severe tier. `confidence` is
-`"measured"` (conductor observed over at least half the segment),
-`"robust"` (same tier under both bounds), `"bound-dependent"` or
-`"low coverage"` (`"no data"` under both bounds). `encroach_*_m2` is the
+`"measured"` (conductor observed over at least half the segment *and*
+the same tier under both bounds), `"robust"` (same tier under both
+bounds, conductor mostly bounded), `"bound-dependent"` (the tier changes
+with the bound, however much of the conductor was seen: the finding sits
+in the unmeasured part) or `"low coverage"` (`"no data"` under both
+bounds). `frac_measured` is reported alongside. `encroach_*_m2` is the
 canopy area under the conductors inside the clearance envelope. Rows are
 ordered by what holds even under the optimistic (upper) conductor
 bound - encroachment, then strike trees - then by the same metrics under

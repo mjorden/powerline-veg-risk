@@ -174,10 +174,11 @@ bounded span (the lower bound is only ~5 m above ground). Tiers are
 <code>"grow-in"</code>, <code>"fall-in"</code>, <code>"no data"</code> (no risk found, but coverage below
 <code>min_observed</code>) and <code>"none"</code>. A grow-in or fall-in finding stands even
 at low coverage, though unseen cells could hide a more severe tier.
-<code>confidence</code> is
-<code>"measured"</code> (conductor observed over at least half the segment),
-<code>"robust"</code> (same tier under both bounds), <code>"bound-dependent"</code> or
-<code>"low coverage"</code> (<code>"no data"</code> under both bounds).
+<code>confidence</code> is <code>"measured"</code> (conductor observed over at least half the
+segment <em>and</em> the same tier under both bounds), <code>"robust"</code> (same tier
+under both bounds, conductor mostly bounded), <code>"bound-dependent"</code> (the
+tier changes with the bound, however much of the conductor was seen:
+the finding sits in the unmeasured part) or <code>"low coverage"</code> (<code>"no data"</code> under both bounds). <code>frac_measured</code> is reported alongside.
 <code>encroach_*_m2</code> is the canopy area under the conductors inside the
 clearance envelope. Rows are ordered by what holds even under the
 optimistic (upper) conductor bound - encroachment, then strike trees -

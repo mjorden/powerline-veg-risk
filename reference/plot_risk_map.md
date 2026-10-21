@@ -15,6 +15,7 @@ plot_risk_map(
   rasters,
   risk,
   structures = NULL,
+  encroach_limits = c(0, NA),
   title = "Vegetation risk along the line",
   source = "USGS 3DEP LiDAR",
   file = NULL
@@ -36,6 +37,15 @@ plot_risk_map(
 - structures:
 
   OSM structures (`sf`), optional.
+
+- encroach_limits:
+
+  Range of the segment colour scale (m²). The lower end is fixed at zero
+  so that no encroachment is always the pale end: with a free scale a
+  line with none anywhere was drawn mid-orange throughout. An `NA` upper
+  end is the largest encroachment on the map, but never below 5 m² (the
+  default grow-in threshold), so an all-zero map keeps a real range. Set
+  both ends to share one scale across maps.
 
 - title:
 
