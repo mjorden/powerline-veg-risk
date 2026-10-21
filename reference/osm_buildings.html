@@ -58,7 +58,9 @@ are skipped.</p>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>An <code>sf</code> POLYGON data frame (EPSG:4326) with <code>osm_id</code>.</p>
+    <p>An <code>sf</code> POLYGON data frame (EPSG:4326) with <code>osm_id</code>; zero rows
+when the area has none (an empty geometry column is <code>sfc_GEOMETRY</code>;
+test <code><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow()</a></code>, not the class).</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

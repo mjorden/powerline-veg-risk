@@ -73,7 +73,10 @@ would otherwise be taught to the classifier as vegetation. Underground
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>An <code>sf</code> LINESTRING data frame (EPSG:4326) with <code>osm_id</code>, <code>name</code>,
-<code>power</code>, <code>voltage_kv</code>, <code>operator</code>.</p>
+<code>power</code>, <code>voltage_kv</code>, <code>operator</code>. Attributes <code>osm_timestamp</code> (the
+OSM data snapshot the answer came from) and <code>osm_query</code> record the
+provenance; <code><a href="osm_power_structures.html">osm_power_structures()</a></code> and <code><a href="osm_buildings.html">osm_buildings()</a></code> carry the
+same two.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -38,4 +38,10 @@ osm_power_lines(
 ## Value
 
 An `sf` LINESTRING data frame (EPSG:4326) with `osm_id`, `name`,
-`power`, `voltage_kv`, `operator`.
+`power`, `voltage_kv`, `operator`. Attributes `osm_timestamp` (the OSM
+data snapshot the answer came from) and `osm_query` record the
+provenance;
+[`osm_power_structures()`](https://mjorden.github.io/powerline-veg-risk/reference/osm_power_structures.md)
+and
+[`osm_buildings()`](https://mjorden.github.io/powerline-veg-risk/reference/osm_buildings.md)
+carry the same two.

@@ -28,4 +28,6 @@ tnm_lidar_tiles(aoi, project = NULL, max_items = 100)
 ## Value
 
 An `sf` data frame of tiles (EPSG:4326 footprints) with columns `title`,
-`url`, `size_mb`, `pub_date`.
+`url`, `size_mb`, `size_bytes`, `pub_date`. Aborts, naming the
+acquisitions that were found, when `project` matches none of them: a
+typo must not come back as an empty table.
