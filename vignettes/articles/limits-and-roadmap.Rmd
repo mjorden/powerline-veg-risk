@@ -1,0 +1,37 @@
+---
+title: "Limits and roadmap"
+description: "What the screen does not do, what the two reviews found, and what a next version would change."
+---
+
+`vegrisk` was built as a portfolio project and is closed out as one. Two four-lens reviews (science, reproducibility, API, graphics) filed 31 issues against it; the cheap and the trust-affecting ones were fixed, and the rest are recorded here with the reasons they stay open. The repository's issue tracker links each item to its discussion.
+
+## Limits
+
+- **Weak labels.** Wire and structure accuracy is agreement with the labelling rules. Nashville's vendor classes give real ground truth for vegetation and buildings only, and they themselves misclassify conductors. A hand-labelled test set (e.g. in CloudCompare) is the next step.
+- **No public 3DEP project labels power lines.** A survey of the 641 USGS 3DEP projects from 2019 onward in the public Entwine index found none using the ASPRS wire classes; the few hits for codes 13/14 were topobathy datasets or state-specific reuse (NC Phase 4 uses 13 for roads). That survey was run outside this repository and is not reproduced here; treat it as a reported finding, not a result of the code.
+- **Bounds rest on assumptions.** Attachment heights are capped (20 m for the H-frames, 45 m for the lattice towers), and every support is assumed to be an OSM vertex or tagged node. A taller or unmapped structure would invalidate the upper bound locally.
+- **The conductor is where it was flown.** Clearance and reach use the conductor elevation and lateral position at the time of the LiDAR flight. There is no allowance for maximum operating sag (temperature or load), ice, or wind blowout, and the lateral phase position is one symmetric offset from the OSM centreline even though the repo records a misregistered centreline at Nashville. A measured conductor is treated as a point height per 5 m bin, not a band, and bins rejected by the sanity checks are dropped without being reported. All of this makes the screen optimistic by the sag and blowout envelope.
+- **Wire labels are trusted.** A wire label requires an observed air gap beneath it, so cells holding only wire-labelled returns count as observed bare ground. A thin branch layer within the label's 4 m layer under a conductor can join the wire label and drop out of the canopy model.
+- **Conductor removal is a judgement.** Canopy within ~1.5 m beneath a conductor can't be told apart from a conductor over dense canopy; both are kept as canopy and flagged as grow-in, which is the conservative choice.
+- **Second circuits** are labelled and their towers masked, but only the study line gets a conductor profile; second-circuit returns over canopy can remain in the canopy model beyond the study line's envelope.
+- **Conductors OSM doesn't map** (telecom and communication lines, unmapped circuits) are not labelled wire. Where they hang free they abstain and stay out of the canopy model; where they cross canopy they look like foliage and are kept as canopy, like any conductor over a crown.
+- **OSM geometry** is volunteer-digitised. Conductor envelopes are sized from where returns actually are, not from the centreline alone.
+- **The structure mask** hides canopy close to each support, so strike trees right beside structures are not scored.
+- **Treetops from a CHM** (local maxima, 5 m window) merge or split crowns in dense stands.
+- **Spatial cross-validation has no buffer** between blocks, and the metrics are single-seed point estimates. The 30 m feature neighbourhoods and the labelling windows reach across block edges, so the spatial numbers are somewhat optimistic; the large gaps (0.21 vs 0.003) are robust, the small ones (0.88 vs 0.83) should not be read without a fold-level spread.
+- **Vertical units** are assumed to match horizontal units (true for both deliveries: metres/metres and US survey feet/US survey feet).
+- **Landsat greenness is not fuel moisture.** Low NDVI over canopy can also mean thin, trimmed or leaf-off crowns, and a 30 m pixel always mixes the right-of-way with its edges. `dry_canopy` ranks segments within one corridor and one composite. It can't be compared across sites or seasons, and it is not a fire-danger rating.
+- **Reanalysis wind is regional.** ERA5 resolves the synoptic flow at 10–25 km, not channelling along a canyon or speed-up over a ridge, and its gusts are a model diagnostic. The watchlist applies thresholds from that record to NWS forecast gusts, which are a different product, so treat the gust threshold as a starting point to tune per site. Trees are assumed to fall downwind, within ±15°; trees that break or lean, or limbs, can do otherwise. The wind-weighted strike-tree count carries no failure probability: it says how many trees the winds point at the line, not how many will fall.
+
+## Roadmap
+
+What a next version would change, in the order it should happen. Each entry closes a review issue; the issue number is the place to read the full argument.
+
+1. **Conductor physics (#7, #24).** Add a sag and blowout allowance from conductor type, span length and a design temperature, use per-vertex lateral phase positions, report the measured conductor as a band rather than a point, and report rejected bins. This is Phase 1 of the digital-twin RFC in `rfcs/0001-wildfire-risk-digital-twin.md`.
+2. **An explicit result object (#9).** Run parameters and provenance travel as R attributes today and are lost by `st_write()` and `saveRDS()`. A `vegrisk_risk` object with `$params` and `$provenance` and a validator, and a composite returned as `list(raster, scenes, dates)`, would fix that once for every downstream step.
+3. **Run manifest and parameter-keyed caches (#15).** The run id, git SHA and reuse record now land in `summary.rds`; a manifest listing every input (tile checksums, OSM snapshot time, Landsat scene ids, the Open-Meteo model and NWS issuance time) and caches keyed by the parameters that produced them are the rest.
+4. **Keep identities (#31).** Segments should carry the OSM way id, name, voltage and chainage; strike trees need a stable id so two runs can be compared tree by tree.
+5. **One breaking-change pass (#21).** Cross-stage parameters (`phase_offset_m`, `growth_m`, `under_line_m`, `half_width_m`) read from the result object instead of being typed again; consistent argument names and order; `quiet=` and `num_threads=`; version 0.2.0 with a NEWS entry.
+6. **Buffered spatial CV with fold-level spread (#19).** Drop training points within the run window plus the feature radius of each test block, and report per-fold ranges or repeated block-CV. This changes the headline CV numbers, so it waits for the result object and the manifest.
+7. **More public data (#3).** Terrain and aspect, burn-probability surfaces, land-cover fuel classes and historical fire perimeters were proposed as further layers; each would get its own issue when picked up.
+8. **A weekly live-API smoke test (#17).** The unit tests run offline on synthetic data; the Overpass, TNM, STAC, Open-Meteo and NWS clients would benefit from a scheduled check with `skip_if_offline()`.

@@ -7,8 +7,32 @@ template:
 
 navbar:
   structure:
-    left: [intro, reference]
+    left: [intro, articles, reference]
     right: [search, github]
+  components:
+    articles:
+      text: Articles
+      menu:
+        - text: How the screen works
+          href: articles/methods.html
+        - text: "Case study: Sunshine Canyon, Colorado"
+          href: articles/sunshine-canyon.html
+        - text: "Case study: West Nashville, Tennessee"
+          href: articles/nashville.html
+        - text: Limits and roadmap
+          href: articles/limits-and-roadmap.html
+
+articles:
+  - title: Method
+    navbar: ~
+    contents:
+      - articles/methods
+      - articles/limits-and-roadmap
+  - title: Case studies
+    navbar: ~
+    contents:
+      - articles/sunshine-canyon
+      - articles/nashville
 
 reference:
   - title: Data acquisition
