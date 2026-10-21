@@ -421,10 +421,12 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   `"grow-in"`, `"fall-in"`, `"no data"` (no risk found, but coverage below
 #'   `min_observed`) and `"none"`. A grow-in or fall-in finding stands even
 #'   at low coverage, though unseen cells could hide a more severe tier.
-#'   `confidence` is
-#'   `"measured"` (conductor observed over at least half the segment),
-#'   `"robust"` (same tier under both bounds), `"bound-dependent"` or
-#'   `"low coverage"` (`"no data"` under both bounds).
+#'   `confidence` is `"measured"` (conductor observed over at least half the
+#'   segment *and* the same tier under both bounds), `"robust"` (same tier
+#'   under both bounds, conductor mostly bounded), `"bound-dependent"` (the
+#'   tier changes with the bound, however much of the conductor was seen:
+#'   the finding sits in the unmeasured part) or `"low coverage"` (`"no
+#'   data"` under both bounds). `frac_measured` is reported alongside.
 #'   `encroach_*_m2` is the canopy area under the conductors inside the
 #'   clearance envelope. Rows are ordered by what holds even under the
 #'   optimistic (upper) conductor bound - encroachment, then strike trees -
@@ -548,9 +550,13 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   p_hi <- tier(out$encroach_hi_m2, out$n_strike_hi)
   out$priority <- factor(p_hi, levels = lv)
   out$priority_lo <- factor(p_lo, levels = lv)
+  # A segment whose tier differs between the bounds is bound-dependent even
+  # if most of its conductor was measured: the disagreement comes from the
+  # part that was not.
   out$confidence <- factor(
     ifelse(p_lo == "no data", "low coverage",
-           ifelse(out$frac_measured >= 0.5, "measured", ifelse(p_lo == p_hi, "robust", "bound-dependent"))),
+           ifelse(p_lo != p_hi, "bound-dependent",
+                  ifelse(out$frac_measured >= 0.5, "measured", "robust"))),
     levels = c("measured", "robust", "bound-dependent", "low coverage")
   )
   out <- out[order(-out$encroach_hi_m2, -out$n_strike_hi, -out$encroach_lo_m2,
