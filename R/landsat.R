@@ -219,17 +219,27 @@ read_landsat_window <- function(sc, aoi, buffer_m, template = NULL) {
 #' Joins a Landsat composite to the LiDAR screen. The LiDAR canopy height
 #' model decides *which* 30 m pixels to read and how much each one counts:
 #'
-#' 1. Each Landsat pixel's canopy fraction is the share of its 1 m CHM cells
-#'    at or above `cover_min_m`. Pixels below `min_canopy_frac` are mostly
-#'    cleared right-of-way, road or roof, and are not scored - their index
-#'    would describe the gap, not the trees.
+#' 1. The CHM is cleaned the way [assess_risk()] cleans it: cells within
+#'    `structure_mask_m` of a support are unknown, and canopy needs
+#'    `min_support` canopy cells in its 3 x 3 window (removes 1-2 cell poles
+#'    and stray returns). Each Landsat pixel's canopy fraction is then the
+#'    share of its *observed* 1 m cells at or above `cover_min_m`, and its
+#'    coverage is the share of its whole 30 m footprint that the LiDAR
+#'    observed. A pixel is scored only if it is canopy-dominated
+#'    (`min_canopy_frac`), mostly observed (`min_coverage`: a pixel on the
+#'    corridor edge or inside a bend otherwise rests on a sliver of canopy
+#'    and its reflectance describes land outside the LiDAR clip) and has
+#'    enough clear looks (`min_obs`).
 #' 2. A segment's value is the mean of its pixels' indices weighted by how
 #'    many of the segment's canopy cells *within `zone_m` of the line* fall
 #'    in each pixel, so it describes the canopy under the conductors rather
 #'    than the forest beside the right-of-way.
-#' 3. Each segment value is ranked against every canopy-dominated pixel in
-#'    the corridor (a percentile, `*_pct`). `dry_canopy` flags segments in
-#'    the lowest `dry_quantile` of `dry_index`.
+#' 3. Each segment value is ranked against every scored pixel in the
+#'    corridor (a percentile, `*_pct`). `dry_canopy` flags segments in the
+#'    lowest `dry_quantile` of `dry_index`. A segment resting on fewer than
+#'    `min_canopy_px` pixels, or on less than `min_canopy_m2` of canopy,
+#'    keeps its indices but gets no percentile: one mixed 30 m pixel cannot
+#'    carry a ranking.
 #'
 #' `dry_grow_in` combines the two screens: grow-in under the optimistic
 #' conductor bound and dry canopy; `dry_grow_in_lo` uses the pessimistic
@@ -251,24 +261,39 @@ read_landsat_window <- function(sc, aoi, buffer_m, template = NULL) {
 #'   the inside of bends that the terrain model's convex hull fills. `NULL`
 #'   uses the farthest canopy return from the line.
 #' @param cover_min_m Canopy height counted as cover.
-#' @param min_canopy_frac Minimum canopy fraction of a Landsat pixel for it to
+#' @param structures,structure_mask_m As in [assess_risk()]: support points
+#'   (OSM nodes and line vertices) whose surroundings are treated as unknown
+#'   rather than canopy or bare ground. Pass the same objects as to
+#'   [assess_risk()] so both screens describe the same canopy.
+#' @param min_support As in [assess_risk()]: a cell counts as canopy only if
+#'   at least this many cells of its 3 x 3 window are canopy. `0` disables
+#'   the filter.
+#' @param min_canopy_frac Minimum canopy fraction (of observed cells) for a
+#'   Landsat pixel to be scored.
+#' @param min_coverage Minimum share of a pixel's 30 m footprint observed by
+#'   the LiDAR for it to be scored.
+#' @param min_obs Minimum clear Landsat observations behind a pixel for it to
 #'   be scored.
 #' @param dry_index `"ndvi"` or `"ndmi"`: the index used for `dry_canopy`.
 #' @param dry_quantile Percentile (0-1) at or below which a segment is
 #'   `dry_canopy`.
-#' @param min_canopy_m2 Segments with less grown-in canopy than this (in
-#'   scored pixels) get their indices but no percentile or `dry_canopy`.
-#' @param min_ref_px Minimum canopy-dominated pixels in the corridor needed to
-#'   compute percentiles; below it the `*_pct` columns are `NA`.
+#' @param min_canopy_m2,min_canopy_px Segments with less grown-in canopy than
+#'   this (in scored pixels), or spread over fewer scored pixels, get their
+#'   indices but no percentile or `dry_canopy`.
+#' @param min_ref_px Minimum scored pixels in the corridor needed to compute
+#'   percentiles; below it the `*_pct` columns are `NA`.
 #' @return A list: `segments` (the risk segments with added columns
 #'   `canopy_px`, `canopy_m2`, `ndvi`, `ndmi`, `ndvi_pct`, `ndmi_pct`,
 #'   `dry_canopy`, `dry_grow_in`, `dry_grow_in_lo`) and `pixels` (`sf`
 #'   points at Landsat pixel centres with `ndvi`, `ndmi`, `n_obs`,
-#'   `canopy_frac`, `scored`).
+#'   `canopy_frac`, `coverage`, `scored`). `attr(segments, "landsat")`
+#'   records the gates and how many pixels each one excluded.
 #' @export
 canopy_dryness <- function(composite, rasters, profile, risk, zone_m = 6, corridor_m = NULL,
-                           cover_min_m = 2, min_canopy_frac = 0.5, dry_index = c("ndvi", "ndmi"),
-                           dry_quantile = 0.25, min_canopy_m2 = 5, min_ref_px = 20) {
+                           cover_min_m = 2, structures = NULL, structure_mask_m = 8,
+                           min_support = 6, min_canopy_frac = 0.5, min_coverage = 0.8,
+                           min_obs = 3, dry_index = c("ndvi", "ndmi"), dry_quantile = 0.25,
+                           min_canopy_m2 = 5, min_canopy_px = 2, min_ref_px = 20) {
   dry_index <- match.arg(dry_index)
   chm <- rasters$chm
   crs <- sf::st_crs(terra::crs(chm))
@@ -292,12 +317,35 @@ canopy_dryness <- function(composite, rasters, profile, risk, zone_m = 6, corrid
   canopy <- terra::mask(canopy, rasters$dtm)
   canopy[pr$dist_m > corridor_m] <- NA
   if (!is.null(rasters$unobserved)) canopy <- terra::mask(canopy, rasters$unobserved, maskvalues = TRUE)
+  # Coverage is judged before the structure mask: a tower pad is observed
+  # ground, not a data gap, even though it is neither canopy nor bare.
+  observed <- terra::ifel(is.na(canopy), 0, 1)
+  if (!is.null(structures) && nrow(structures) > 0) {
+    mask <- sf::st_union(sf::st_buffer(sf::st_transform(sf::st_geometry(structures), crs),
+                                       structure_mask_m / m))
+    canopy <- terra::mask(canopy, terra::vect(mask), inverse = TRUE, updatevalue = NA)
+  }
+  if (min_support > 0) {
+    support <- terra::focal(canopy == 1, w = 3, fun = "sum", na.rm = TRUE)
+    canopy <- terra::ifel(is.na(canopy), NA, terra::ifel(support >= min_support, canopy, 0))
+  }
   frac <- terra::resample(canopy, ls, method = "average")
+  # Observed cells over the whole footprint, including the part of a pixel
+  # that lies beyond the CHM's extent (no source cells there = unobserved).
+  cells_per_px <- prod(terra::res(ls) / terra::res(chm))
+  coverage <- terra::resample(observed, ls, method = "sum") / cells_per_px
+  coverage <- terra::ifel(is.na(coverage), 0, coverage)
   names(frac) <- "canopy_frac"
+  names(coverage) <- "coverage"
 
-  px <- terra::as.data.frame(c(ls, frac), xy = TRUE, cells = TRUE, na.rm = FALSE)
+  px <- terra::as.data.frame(c(ls, frac, coverage), xy = TRUE, cells = TRUE, na.rm = FALSE)
   px <- px[!is.na(px$ndvi) & !is.na(px$canopy_frac), ]
-  px$scored <- px$canopy_frac >= min_canopy_frac
+  gates <- list(canopy_frac = px$canopy_frac >= min_canopy_frac,
+                coverage = px$coverage >= min_coverage,
+                n_obs = !is.na(px$n_obs) & px$n_obs >= min_obs)
+  px$scored <- Reduce(`&`, gates)
+  # How many pixels each gate removed on its own, for the provenance record.
+  n_excluded <- vapply(gates, function(g) sum(!g), 0L)
 
   # Grown-in canopy cells (1 m), tagged with their segment and Landsat pixel.
   v <- terra::values(canopy)[, 1]
@@ -325,20 +373,24 @@ canopy_dryness <- function(composite, rasters, profile, risk, zone_m = 6, corrid
   })
   seg_stats <- do.call(rbind, seg_stats)
   for (k in names(seg_stats)) seg[[k]] <- seg_stats[[k]]
-  # A few square metres of canopy can't carry a ranking: report the index,
-  # leave the percentile undefined.
-  thin <- seg$canopy_m2 < min_canopy_m2
+  # A few square metres of canopy, or a single mixed pixel, can't carry a
+  # ranking: report the index, leave the percentile undefined.
+  thin <- seg$canopy_m2 < min_canopy_m2 | seg$canopy_px < min_canopy_px
   seg$ndvi_pct <- ifelse(thin, NA_real_, pct(seg$ndvi, "ndvi"))
   seg$ndmi_pct <- ifelse(thin, NA_real_, pct(seg$ndmi, "ndmi"))
   seg$dry_canopy <- seg[[paste0(dry_index, "_pct")]] <= dry_quantile
   seg$dry_grow_in <- seg$priority == "grow-in" & seg$dry_canopy
   seg$dry_grow_in_lo <- seg$priority_lo == "grow-in" & seg$dry_canopy
 
-  pixels <- sf::st_as_sf(px[, c("x", "y", "ndvi", "ndmi", "n_obs", "canopy_frac", "scored")],
+  pixels <- sf::st_as_sf(px[, c("x", "y", "ndvi", "ndmi", "n_obs", "canopy_frac", "coverage", "scored")],
                          coords = c("x", "y"), crs = crs)
   attr(seg, "landsat") <- list(scenes = attr(composite, "scenes"), dates = attr(composite, "dates"),
-                               n_ref_px = nrow(ref), dry_index = dry_index,
-                               dry_quantile = dry_quantile, min_canopy_frac = min_canopy_frac,
+                               n_ref_px = nrow(ref), n_px_excluded = n_excluded,
+                               dry_index = dry_index, dry_quantile = dry_quantile,
+                               min_canopy_frac = min_canopy_frac, min_coverage = min_coverage,
+                               min_obs = min_obs, min_canopy_px = min_canopy_px,
+                               structure_mask_m = if (!is.null(structures)) structure_mask_m,
+                               min_support = min_support,
                                min_canopy_m2 = min_canopy_m2, corridor_m = corridor_m)
   list(segments = seg, pixels = pixels)
 }
