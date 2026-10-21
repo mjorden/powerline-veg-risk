@@ -13,8 +13,11 @@
 #                parallel phases pass, while crown tops - which can also
 #                pass the air-gap test - are compact and do not)
 #   vegetation - every other above-ground point, excluding a margin around
-#                the classes above and excluding elevated near-line
-#                candidates that failed the wire test (those abstain)
+#                the classes above and excluding elevated suspended
+#                candidates that failed the wire test or lie beyond
+#                wire_search_m of any mapped line (those abstain: a
+#                suspended layer with empty air beneath it is more likely an
+#                unmapped conductor than a tree)
 #
 # Points left NA are not used for training but are still classified by the
 # model. The rules use height and empty space beneath a point, which the
@@ -38,6 +41,10 @@
 #' @param wire_min_m Minimum height for a wire label.
 #' @param wire_search_m Wire labels are only assigned within this horizontal
 #'   distance of a mapped line (covers OSM misalignment and phase spacing).
+#'   Suspended candidates farther away than this are never labelled wire,
+#'   but they abstain (`NA`) rather than becoming vegetation: distribution,
+#'   telecom and unmapped circuits are not in `lines`, and their conductors
+#'   must not be taught as trees.
 #' @param run_half_m,row_m,min_run,min_extent_m,min_occupancy Along-line run
 #'   test. For each candidate cell, its "row" is the candidates within
 #'   `run_half_m` chainage and `row_m` perpendicular offset of it (one
@@ -70,17 +77,21 @@ weak_labels <- function(feat, crs, lines, structures = NULL, buildings = NULL,
   if (nrow(cand) > 0) {
     verts <- line_vertex_table(lines, crs)
     pr <- line_project(cbind((cand$cx + 0.5) * cs, (cand$cy + 0.5) * cs), verts, m)
-    cand[, `:=`(line_id = pr$line_id, s_m = pr$s_m, offset_m = pr$offset_m)]
-    cand <- cand[pr$dist_m <= wire_search_m]
-    cand[, wire := along_line_run(line_id, s_m, offset_m, run_half_m, min_run,
-                                  min_extent_m, row_m, min_occupancy)]
+    cand[, `:=`(line_id = pr$line_id, s_m = pr$s_m, offset_m = pr$offset_m,
+                near = pr$dist_m <= wire_search_m, wire = FALSE)]
+    # The run test only makes sense along a mapped line, so it is applied to
+    # the near candidates; far candidates keep wire = FALSE and abstain below.
+    cand[near == TRUE, wire := along_line_run(line_id, s_m, offset_m, run_half_m, min_run,
+                                              min_extent_m, row_m, min_occupancy)]
   } else {
-    cand[, wire := logical()]
+    cand[, `:=`(near = logical(), wire = logical())]
   }
   key <- feat[, paste(floor(X / cs), floor(Y / cs))]
   is_wire <- key %in% cand[wire == TRUE, paste(cx, cy)]
-  # Elevated near-line candidates that failed the run test abstain rather
-  # than becoming vegetation: they may be conductors the rule missed.
+  # Suspended candidates that are not wire abstain rather than becoming
+  # vegetation: near the line they may be conductors the run test missed;
+  # beyond wire_search_m they may belong to a distribution, telecom or
+  # unmapped circuit that is not in `lines` at all.
   abstain <- key %in% cand[wire == FALSE, paste(cx, cy)] & feat$height_m >= wire_min_m
   lab[is_wire] <- "wire"
   ambiguous <- ambiguous | abstain
