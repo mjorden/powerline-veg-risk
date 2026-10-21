@@ -39,6 +39,7 @@ Suggests:
     devtools,
     ggplot2,
     patchwork,
+    RCSF,
     scales,
     systemfonts,
     testthat (>= 3.0.0)

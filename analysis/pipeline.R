@@ -19,10 +19,23 @@ run_case_study <- function(cfg) {
   fig <- function(name) file.path("man/figures", paste0(cfg$id, "_", name, ".png"))
   t0 <- Sys.time()
   step <- function(...) message(sprintf("[%s %5.0fs] ", cfg$id, as.numeric(Sys.time() - t0, units = "secs")), ...)
+  # OSM layers are cached as GeoJSON with a sidecar recording the OSM
+  # snapshot time and the query. An empty answer is not cached: Overpass
+  # aborts are refused upstream (#8), but a genuinely empty area is still
+  # re-queried next run rather than frozen.
   cache <- function(path, expr) {
     if (file.exists(path)) return(st_read(path, quiet = TRUE))
     x <- expr
+    if (nrow(x) == 0) {
+      warning(sprintf("%s: OSM returned nothing; not cached, will be re-queried next run.", basename(path)),
+              call. = FALSE)
+      return(x)
+    }
     st_write(x, path, quiet = TRUE)
+    jsonlite::write_json(list(osm_timestamp = attr(x, "osm_timestamp"), query = attr(x, "osm_query"),
+                              fetched_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+                              n = nrow(x)),
+                         paste0(path, ".meta.json"), auto_unbox = TRUE, pretty = TRUE)
     x
   }
 

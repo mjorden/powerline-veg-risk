@@ -17,7 +17,9 @@ mixing years in one model mixes vegetation states).}
 }
 \value{
 An \code{sf} data frame of tiles (EPSG:4326 footprints) with columns
-\code{title}, \code{url}, \code{size_mb}, \code{pub_date}.
+\code{title}, \code{url}, \code{size_mb}, \code{size_bytes}, \code{pub_date}. Aborts, naming the
+acquisitions that were found, when \code{project} matches none of them: a
+typo must not come back as an empty table.
 }
 \description{
 Queries The National Map (TNM) Access API for "Lidar Point Cloud (LPC)"
