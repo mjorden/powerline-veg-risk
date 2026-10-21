@@ -148,9 +148,16 @@ theme_vegrisk <- function(base_size = 10, style = vegrisk_style()) {
 #' @param structures OSM structures (`sf`), optional.
 #' @param title Plot title.
 #' @param source Data credit shown in the subtitle.
+#' @param encroach_limits Range of the segment colour scale (m²). The
+#'   lower end is fixed at zero so that no encroachment is always the pale
+#'   end: with a free scale a line with none anywhere was drawn mid-orange
+#'   throughout. An `NA` upper end is the largest encroachment on the map,
+#'   but never below 5 m² (the default grow-in threshold), so an
+#'   all-zero map keeps a real range. Set both ends to share one scale
+#'   across maps.
 #' @param file Output PNG path, or `NULL` to return the plot.
 #' @export
-plot_risk_map <- function(rasters, risk, structures = NULL,
+plot_risk_map <- function(rasters, risk, structures = NULL, encroach_limits = c(0, NA),
                           title = "Vegetation risk along the line",
                           source = "USGS 3DEP LiDAR", file = NULL) {
   rlang::check_installed(c("ggplot2", "scales"))
@@ -164,6 +171,9 @@ plot_risk_map <- function(rasters, risk, structures = NULL,
   # "no data" only replaces "none", so this means no data under both bounds.
   seg$certain[seg$priority_lo %in% "no data"] <- "insufficient LiDAR coverage"
   gap <- seg$certain == "insufficient LiDAR coverage"
+  if (is.na(encroach_limits[2])) {
+    encroach_limits[2] <- max(5, seg$encroach_lo_m2, na.rm = TRUE)
+  }
   strike <- risk$trees[risk$trees$strike, ]
   strike$both <- factor(ifelse(strike$strike_lo & strike$strike_hi, "under both bounds", "under one bound"),
                         levels = c("under both bounds", "under one bound"))
@@ -175,7 +185,7 @@ plot_risk_map <- function(rasters, risk, structures = NULL,
     ggplot2::geom_sf(data = seg[!gap, ], ggplot2::aes(colour = encroach_lo_m2, linetype = certain), linewidth = 1.1) +
     ggplot2::geom_sf(data = seg[gap, ], ggplot2::aes(linetype = certain), colour = pal$muted, linewidth = 1.1) +
     scale_colour_vegrisk_encroach(name = "Canopy in clearance envelope\nif conductor at code minimum (m\u00b2)",
-                                  limits = if (any(gap)) c(0, NA), pal = pal) +
+                                  limits = encroach_limits, oob = scales::squish, pal = pal) +
     ggplot2::scale_linetype_manual(values = c(`measured / robust` = "solid", `bound-dependent` = "22",
                                               `insufficient LiDAR coverage` = "11"),
                                    name = NULL) +

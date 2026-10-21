@@ -363,3 +363,42 @@ test_that("the midmod risk map dots 'no data' segments and ignores voids off the
   expect_length(i, 1)
   expect_true(all(built$data[[i]]$linetype == "11"))
 })
+
+test_that("no encroachment anywhere is drawn at the pale end of the scale (#5)", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("scales")
+  r <- make_rasters(data.frame(x = x0 + 150.5, y = y0 + 40.5, h = 4)) # nothing under the line
+  rk <- risk_for(r, tree_ws_m = 3)
+  expect_true(all(rk$segments$encroach_lo_m2 == 0))
+  # Before the fix a free scale rescaled c(0, 0) to 0.5: mid-orange for zero.
+  built <- suppressWarnings(ggplot2::ggplot_build(plot_risk_map(r, rk)))
+  seg_layer <- built$data[[2]]
+  expect_true(all(toupper(seg_layer$colour) == "#FEE8C8"))
+  # A shared scale can be imposed from outside.
+  built2 <- suppressWarnings(ggplot2::ggplot_build(plot_risk_map(r, rk, encroach_limits = c(0, 100))))
+  expect_equal(built2$plot$scales$get_scales("colour")$limits, c(0, 100))
+})
+
+test_that("a mostly measured segment whose tier depends on the bound is bound-dependent (#14)", {
+  # Conductor returns along the first 58 m of segment 1 at 10 m; a tree at
+  # 80 m, in the unmeasured part, encroaches under the code-minimum bound
+  # (5 m) but not under the optimistic one (20 m).
+  r <- make_rasters(data.frame(x = x0 + 80.5, y = y0 + 0.5, h = 8))
+  s <- segs()
+  wires <- data.table::data.table(X = x0 + seq(0.25, 58, 0.5), Y = y0 + 0.3, height_m = 10,
+                                  pred = factor("wire", levels = label_levels),
+                                  label = factor("wire", levels = label_levels))
+  prof <- conductor_profile(wires, s, r$dtm, min_ground_clear_m = 5, attach_m = 20, search_m = 15)
+  rk <- sf::st_drop_geometry(assess_risk(r, prof, s, tree_ws_m = 3)$segments)
+  rk <- rk[order(rk$seg_id), ]
+  expect_gte(rk$frac_measured[1], 0.5)
+  expect_equal(as.character(rk$priority_lo[1]), "grow-in")
+  expect_equal(as.character(rk$priority[1]), "none")
+  expect_equal(as.character(rk$confidence[1]), "bound-dependent")  # was "measured"
+  expect_equal(as.character(rk$confidence[2]), "robust")
+  # Tiers that agree on a mostly measured segment are still "measured".
+  clear <- make_rasters(data.frame(x = numeric(), y = numeric(), h = numeric()))
+  prof2 <- conductor_profile(wires, s, clear$dtm, min_ground_clear_m = 5, attach_m = 20, search_m = 15)
+  rk2 <- sf::st_drop_geometry(assess_risk(clear, prof2, s, tree_ws_m = 3)$segments)
+  expect_equal(as.character(rk2$confidence[rk2$seg_id == 1]), "measured")
+})
