@@ -115,7 +115,37 @@ test_that("zero treetops returns a full, empty trees schema", {
   r <- make_rasters(data.frame(x = x0 + 1, y = y0 + 40, h = 0.5))
   rk <- risk_for(r)
   expect_equal(nrow(rk$trees), 0)
-  expect_true(all(c("strike", "strike_lo", "strike_hi", "reach_lo_m") %in% names(rk$trees)))
+  expect_true(all(c("tree_id", "strike", "strike_lo", "strike_hi", "reach_lo_m") %in% names(rk$trees)))
+})
+
+test_that("strike trees carry a stable id and the profile reports its rejected bins (#31, #24)", {
+  trees <- data.frame(x = x0 + c(50.5, 150.5), y = y0 + 13.5, h = c(15, 12))
+  rk1 <- risk_for(make_rasters(trees), phase_offset_m = 3, tree_ws_m = 3)
+  rk2 <- risk_for(make_rasters(trees[2:1, ]), phase_offset_m = 3, tree_ws_m = 3)
+  expect_equal(length(unique(rk1$trees$tree_id)), 2)
+  expect_setequal(rk1$trees$tree_id, rk2$trees$tree_id)   # same data, same ids, any order
+
+  s <- segs()
+  dtm <- make_rasters(trees)$dtm
+  # Returns along x = 0..100: a healthy run at 12 m, one bin far below the
+  # code minimum, one lone spike, and one bin with too few points.
+  w <- rbind(
+    data.frame(X = x0 + seq(0.5, 49.5, 0.5), Y = y0, height_m = 12),
+    data.frame(X = x0 + 55 + 0:4 * 0.5, Y = y0, height_m = 2),    # below ground + 10 m floor
+    data.frame(X = x0 + 75 + 0:4 * 0.5, Y = y0, height_m = 40),   # implausible spike
+    data.frame(X = x0 + 92, Y = y0, height_m = 12)                # one point: too few
+  )
+  w <- data.table::as.data.table(w)
+  w[, `:=`(pred = factor("wire", levels = label_levels), label = factor("wire", levels = label_levels))]
+  prof <- conductor_profile(w, s, dtm, min_ground_clear_m = 10, attach_m = 10, search_m = 15)
+  b <- attr(prof, "bins")
+  expect_equal(nrow(b), 1)
+  expect_equal(b$n_bins, 13)
+  expect_equal(b$n_too_few, 1)
+  expect_equal(b$n_below_floor, 1)
+  expect_equal(b$n_implausible, 1)
+  expect_equal(b$n_measured, 10)
+  expect_equal(b$n_measured + b$n_too_few + b$n_below_floor + b$n_implausible, b$n_bins)
 })
 
 test_that("taut-span upper bound bridges a gully instead of following it", {

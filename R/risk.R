@@ -239,7 +239,12 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
 #' @param min_ground_clear_m,attach_m,max_span_m Bounds parameters, metres.
 #' @return data.frame of vertices: `line_id`, `x`, `y`, `tx`, `ty` (unit
 #'   tangent along the line), `s_m`, `seg_id`, `ground`, `z_lo`, `z_hi`,
-#'   `src`.
+#'   `src`. The attribute `bins` is a data frame with one row per line
+#'   counting the chainage bins that held conductor returns (`n_bins`) and
+#'   how many each sanity check rejected (`n_too_few`, `n_below_floor`,
+#'   `n_implausible`), with `n_measured` the bins that survived, so a
+#'   profile that silently lost most of its returns can be told from one
+#'   that never had them.
 #' @export
 conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
                               search_m = 15, min_p_wire = 0.9, structure_mask_m = 8,
@@ -283,6 +288,8 @@ conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
     d_sup <- FNN::get.knnx(as.matrix(sup[, c("xy.X", "xy.Y")]), as.matrix(w[, c("X", "Y")]), k = 1)$nn.dist[, 1] * m
     w <- w[d_sup > structure_mask_m]
   }
+  bin_log <- data.frame(line_id = unique(v$line_id), n_bins = 0L, n_too_few = 0L,
+                        n_below_floor = 0L, n_implausible = 0L, n_measured = 0L)
   if (nrow(w) > 0) {
     xy <- as.matrix(w[, c("X", "Y")])
     pr <- line_project(xy, v, m)
@@ -296,12 +303,19 @@ conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
       })
       bins <- data.frame(line_id = bins$line_id, s_m = (bins$bin + 0.5) * bin_m,
                          z = bins$z[, "q"], n = bins$z[, "n"])
-      bins <- bins[bins$n >= min_bin_points, ]
       for (lid in unique(bins$line_id)) {
         i <- which(v$line_id == lid)
+        k <- which(bin_log$line_id == lid)
         b <- bins[bins$line_id == lid, ]
+        bin_log$n_bins[k] <- nrow(b)
+        b <- b[b$n >= min_bin_points, ]
+        bin_log$n_too_few[k] <- bin_log$n_bins[k] - nrow(b)
         floor_z <- stats::approx(v$s_m[i], v$z_lo[i], xout = b$s_m, rule = 2)$y
-        b <- plausible_bins(b[b$z >= floor_z, ], max_slope)
+        above <- b[b$z >= floor_z, ]
+        bin_log$n_below_floor[k] <- nrow(b) - nrow(above)
+        b <- plausible_bins(above, max_slope)
+        bin_log$n_implausible[k] <- nrow(above) - nrow(b)
+        bin_log$n_measured[k] <- nrow(b)
         if (nrow(b) == 0) next
         zz <- interp_with_gaps(b, v$s_m[i], bin_m, max_gap_m)
         ok <- !is.na(zz)
@@ -311,6 +325,7 @@ conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
       }
     }
   }
+  attr(v, "bins") <- bin_log
   v
 }
 
@@ -423,8 +438,9 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   would otherwise be `"none"`, is tiered `"no data"`: absence of risk
 #'   cannot be claimed where the LiDAR did not see the ground.
 #' @return A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
-#'   treetops: `seg_id`, `height_m`, `dh_m` horizontal distance to the
-#'   nearest conductor, `reach_lo_m` / `reach_hi_m` the height a tree there
+#'   treetops: `tree_id` (the treetop's position to 0.1 CRS units, stable
+#'   across runs on the same data), `seg_id`, `height_m`, `dh_m` horizontal
+#'   distance to the nearest conductor, `reach_lo_m` / `reach_hi_m` the height a tree there
 #'   needs to reach the conductor under each bound (the minimum 3D distance
 #'   to any conductor vertex within reach, less the phase offset),
 #'   `dz_lo_m` / `dz_hi_m` the conductor's height above the tree's base at
@@ -520,6 +536,7 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     rl <- min_reach(xy, ground, profile$z_lo, profile, m, phase_offset_m, h)
     rh <- min_reach(xy, ground, profile$z_hi, profile, m, phase_offset_m, h)
     trees <- sf::st_sf(
+      tree_id = sprintf("%.0f_%.0f", xy[, 1] * 10, xy[, 2] * 10),
       seg_id = nt$seg_id, height_m = tt$Z, dh_m = nt$dh,
       reach_lo_m = rl$reach, reach_hi_m = rh$reach, dz_lo_m = rl$dz, dz_hi_m = rh$dz,
       geometry = sf::st_geometry(tt)
@@ -586,7 +603,7 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
 }
 
 empty_trees <- function(crs) {
-  sf::st_sf(seg_id = integer(), height_m = numeric(), dh_m = numeric(),
+  sf::st_sf(tree_id = character(), seg_id = integer(), height_m = numeric(), dh_m = numeric(),
             reach_lo_m = numeric(), reach_hi_m = numeric(),
             dz_lo_m = numeric(), dz_hi_m = numeric(),
             strike_lo = logical(), strike_hi = logical(), strike = logical(),

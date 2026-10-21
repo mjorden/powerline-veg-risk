@@ -85,8 +85,9 @@ cannot be claimed where the LiDAR did not see the ground.}
 }
 \value{
 A list: \code{segments} (\code{sf}, one row per segment) and \code{trees} (\code{sf}
-treetops: \code{seg_id}, \code{height_m}, \code{dh_m} horizontal distance to the
-nearest conductor, \code{reach_lo_m} / \code{reach_hi_m} the height a tree there
+treetops: \code{tree_id} (the treetop's position to 0.1 CRS units, stable
+across runs on the same data), \code{seg_id}, \code{height_m}, \code{dh_m} horizontal
+distance to the nearest conductor, \code{reach_lo_m} / \code{reach_hi_m} the height a tree there
 needs to reach the conductor under each bound (the minimum 3D distance
 to any conductor vertex within reach, less the phase offset),
 \code{dz_lo_m} / \code{dz_hi_m} the conductor's height above the tree's base at
