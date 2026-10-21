@@ -31,10 +31,12 @@ cv_point_classifier(
 \item{seed}{RNG seed.}
 }
 \value{
-A list with \code{metrics} (per-class precision / recall / F1 and
-balanced accuracy for each scheme), \code{confusion} (spatial-CV confusion
-matrix in estimated point counts, rows = weak label, columns =
-prediction) and \code{fold_counts} (labelled points per spatial fold).
+A list with \code{metrics} (one row per scheme and class: \code{n}
+estimated held-out points, \code{prevalence}, \code{precision}, \code{recall}, \code{f1},
+\code{avg_precision}), \code{summary} (one row per scheme: \code{balanced_accuracy},
+\code{n_eval}), \code{confusion} (spatial-CV confusion matrix in estimated point
+counts, rows = weak label, columns = prediction) and \code{fold_counts}
+(labelled points per spatial fold).
 }
 \description{
 Every held-out non-vegetation point is scored; vegetation is scored on a

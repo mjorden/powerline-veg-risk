@@ -48,7 +48,8 @@ line_corridor <- function(lines, crs, half_width_m = 40) {
 #'   column `Zref` (lidR convention) and heights in `Z`.
 #' @export
 read_corridor <- function(files, lines, half_width_m = 40) {
-  ctg <- lidR::readLAScatalog(files, progress = FALSE)
+  # Tile order decides point order; sort so downstream seeds see one order.
+  ctg <- lidR::readLAScatalog(sort(files), progress = FALSE)
   lidR::opt_filter(ctg) <- "-drop_class 7 17 18 -drop_withheld"
   lidR::opt_select(ctg) <- "xyzirnc"
   corridor <- line_corridor(lines, sf::st_crs(ctg), half_width_m)

@@ -4,12 +4,13 @@
 \alias{assign_blocks}
 \title{Assign points to spatial blocks and CV folds}
 \usage{
-assign_blocks(feat, crs, block_m = 100, n_folds = 5, seed = 1)
+assign_blocks(feat, crs = NULL, block_m = 100, n_folds = 5, seed = 1)
 }
 \arguments{
 \item{feat}{A features table with \code{X}, \code{Y}.}
 
-\item{crs}{CRS of the coordinates.}
+\item{crs}{CRS of the coordinates; defaults to the one recorded by
+\code{\link[=point_features]{point_features()}} and must agree with it when both are given.}
 
 \item{block_m}{Block edge length in metres.}
 
@@ -18,7 +19,9 @@ assign_blocks(feat, crs, block_m = 100, n_folds = 5, seed = 1)
 \item{seed}{RNG seed for fold assignment.}
 }
 \value{
-\code{feat} with integer columns \code{block} and \code{fold}.
+\code{feat} with integer columns \code{block} and \code{fold}. Block ids are
+numbered by position (west to east, then south to north), so they do
+not depend on row order.
 }
 \description{
 Assign points to spatial blocks and CV folds

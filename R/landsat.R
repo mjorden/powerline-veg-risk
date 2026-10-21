@@ -156,17 +156,24 @@ norm_diff <- function(a, b) (a - b) / (a + b)
 #' @param buffer_m Extra margin read around `aoi`, in metres.
 #' @return A `SpatRaster` on the Landsat 30 m grid (UTM) with layers `ndvi`,
 #'   `ndmi` and `n_obs` (clear observations per pixel). Attributes `scenes`
-#'   (ids used) and `dates` record what went into it.
+#'   (ids used) and `dates` record what went into it; `scene_log` is a data
+#'   frame of every scene offered (`id`, `datetime`, `used`, `skip_reason`:
+#'   `NA` when used, `"no coverage"` when the scene misses the AOI, else
+#'   the read error), so a composite thinned by transient failures can be
+#'   told from one that used every scene.
 #' @export
 landsat_composite <- function(scenes, aoi, buffer_m = 100) {
   if (nrow(scenes) == 0) rlang::abort("No scenes to composite.")
   stacks <- list()
   used <- character()
+  skip_reason <- rep(NA_character_, nrow(scenes))
   template <- NULL
   for (i in seq_len(nrow(scenes))) {
     sc <- scenes[i, ]
     r <- tryCatch(read_landsat_window(sc, aoi, buffer_m, template), error = function(e) {
-      warning(sprintf("Skipping Landsat scene %s: %s", sc$id, conditionMessage(e)), call. = FALSE)
+      msg <- conditionMessage(e)
+      skip_reason[i] <<- if (grepl("does not cover the AOI", msg, fixed = TRUE)) "no coverage" else msg
+      warning(sprintf("Skipping Landsat scene %s: %s", sc$id, msg), call. = FALSE)
       NULL
     })
     if (is.null(r)) next
@@ -183,6 +190,9 @@ landsat_composite <- function(scenes, aoi, buffer_m = 100) {
   names(out) <- c("ndvi", "ndmi", "n_obs")
   attr(out, "scenes") <- used
   attr(out, "dates") <- as.Date(scenes$datetime[match(used, scenes$id)])
+  attr(out, "scene_log") <- data.frame(id = scenes$id, datetime = scenes$datetime,
+                                       used = scenes$id %in% used, skip_reason = skip_reason,
+                                       stringsAsFactors = FALSE)
   out
 }
 

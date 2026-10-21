@@ -6,7 +6,7 @@
 \usage{
 weak_labels(
   feat,
-  crs,
+  crs = NULL,
   lines,
   structures = NULL,
   buildings = NULL,
@@ -29,7 +29,8 @@ weak_labels(
 \arguments{
 \item{feat}{Output of \code{\link[=point_features]{point_features()}}.}
 
-\item{crs}{CRS of the point cloud.}
+\item{crs}{CRS of the point cloud; defaults to the one recorded by
+\code{\link[=point_features]{point_features()}} and must agree with it when both are given.}
 
 \item{lines, structures, buildings}{\code{sf} layers from OSM (any CRS).}
 

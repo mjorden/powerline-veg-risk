@@ -16,7 +16,11 @@ landsat_composite(scenes, aoi, buffer_m = 100)
 \value{
 A \code{SpatRaster} on the Landsat 30 m grid (UTM) with layers \code{ndvi},
 \code{ndmi} and \code{n_obs} (clear observations per pixel). Attributes \code{scenes}
-(ids used) and \code{dates} record what went into it.
+(ids used) and \code{dates} record what went into it; \code{scene_log} is a data
+frame of every scene offered (\code{id}, \code{datetime}, \code{used}, \code{skip_reason}:
+\code{NA} when used, \code{"no coverage"} when the scene misses the AOI, else
+the read error), so a composite thinned by transient failures can be
+told from one that used every scene.
 }
 \description{
 Reads only the window around \code{aoi} from each scene's cloud-optimised

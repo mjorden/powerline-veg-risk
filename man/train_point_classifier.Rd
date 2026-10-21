@@ -25,7 +25,8 @@ train_point_classifier(
 \item{seed}{RNG seed.}
 }
 \value{
-A \code{ranger} model (probability forest).
+A \code{ranger} model (probability forest) with \verb{$prior} (label
+prevalence) and \verb{$features} (the predictor names).
 }
 \description{
 Vegetation is subsampled to at most \code{n_per_class} points (it outnumbers
@@ -36,4 +37,9 @@ way estimates class posteriors under \emph{equal} priors; the true label
 prevalence is stored on the model (\verb{$prior}) and \code{\link[=classify_probs]{classify_probs()}}
 re-weights posteriors by it, so decisions are made at the site's real
 class mix rather than flooding the rare classes with false positives.
+}
+\details{
+Predictors are the columns \code{\link[=point_features]{point_features()}} recorded (its \code{features}
+attribute) minus \code{drop_features}; a label, a fold id, a joined column or
+a previous model's \code{pred} / \verb{p_*} output is never used as a predictor.
 }
