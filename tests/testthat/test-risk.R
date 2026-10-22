@@ -115,7 +115,84 @@ test_that("zero treetops returns a full, empty trees schema", {
   r <- make_rasters(data.frame(x = x0 + 1, y = y0 + 40, h = 0.5))
   rk <- risk_for(r)
   expect_equal(nrow(rk$trees), 0)
-  expect_true(all(c("tree_id", "strike", "strike_lo", "strike_hi", "reach_lo_m") %in% names(rk$trees)))
+  expect_true(all(c("tree_id", "strike", "strike_lo", "strike_hi", "strike_possible", "strike_certain",
+                    "reach_lo_m", "reach_min_m") %in% names(rk$trees)))
+})
+
+test_that("a tree whose base lies between the conductor bounds can strike in between (#49)", {
+  # Ground rises 1 m per metre north: the tree at y0 + 20 stands 20 m above
+  # the line's ground. Conductor bracketed at [5, 40] m above line ground.
+  trees <- data.frame(x = x0 + 50.5, y = y0 + 20.5, h = 18)
+  r <- make_rasters(trees, slope = 1)
+  s <- segs()
+  prof <- line_vertex_table(s, utm)
+  prof$seg_id <- 1L
+  prof$ground <- 0
+  prof$z_lo <- 5
+  prof$z_hi <- 40
+  prof$src <- "bounded"
+  rk <- assess_risk(r, prof, s, phase_offset_m = 3, tree_ws_m = 3)
+  tt <- rk$trees
+  expect_equal(nrow(tt), 1)
+  # Reach at the bounds: sqrt(17.5^2 + 15.5^2) = 23.4 and sqrt(17.5^2 + 19.5^2) = 26.2, both > 18;
+  # at a conductor level with the base: 17.5 < 18.
+  expect_false(tt$strike_lo)
+  expect_false(tt$strike_hi)
+  expect_equal(tt$reach_min_m, 17.5, tolerance = 0.01)
+  expect_true(tt$strike_possible)
+  expect_false(tt$strike_certain)
+  expect_true(tt$strike)
+  sg <- sf::st_drop_geometry(rk$segments)
+  expect_equal(sg$n_strike_possible[sg$seg_id == 1], 1)
+  expect_equal(sg$n_strike_certain[sg$seg_id == 1], 0)
+  expect_equal(as.character(sg$priority_lo[sg$seg_id == 1]), "fall-in")
+  expect_equal(as.character(sg$priority[sg$seg_id == 1]), "none")
+  expect_equal(as.character(sg$confidence[sg$seg_id == 1]), "bound-dependent")
+})
+
+test_that("canopy beside the outer phase at conductor height is a clearance breach (#50)", {
+  # Conductor at 10 m (both bounds), outer phase 3 m off the centreline. A
+  # 12 m crown centred 4.5 m off the line: vertical gap to its top is
+  # negative, horizontal gap to the phase 1.5 m, so the radial clearance is
+  # 1.5 m. Under a vertical-only rule in a 6 m band it was invisible.
+  trees <- data.frame(x = x0 + 50.5, y = y0 + 4.5, h = 12)
+  rk <- risk_for(make_rasters(trees), phase_offset_m = 3, tree_ws_m = 3)
+  s <- sf::st_drop_geometry(rk$segments)
+  expect_lt(s$min_clearance_lo_m[s$seg_id == 1], 2)
+  expect_gte(s$encroach_lo_m2[s$seg_id == 1], 5)
+  expect_equal(as.character(s$priority[s$seg_id == 1]), "grow-in")
+  expect_equal(s$n_strike_possible[s$seg_id == 1], 0)
+  # A zone narrower than phase offset + clearance target is refused.
+  expect_error(risk_for(make_rasters(trees), phase_offset_m = 3, under_line_m = 6, tree_ws_m = 3),
+               "narrower")
+})
+
+test_that("line_supports() confirms vertices with tagged structures and logs measured bins above the chord (#51)", {
+  ln <- sf::st_sf(geometry = sf::st_sfc(
+    sf::st_linestring(rbind(c(x0, y0), c(x0 + 100, y0 + 0.5), c(x0 + 200, y0))), crs = utm))
+  towers <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(x0, y0)), sf::st_point(c(x0 + 200, y0)),
+                                            sf::st_point(c(x0 + 150, y0 + 30)), crs = utm))  # the third is another circuit
+  sup <- line_supports(ln, towers, utm)
+  expect_equal(nrow(sup), 3)
+  expect_equal(sup$confirmed, c(TRUE, FALSE, TRUE))   # the bend vertex is not a structure
+  expect_equal(sup$use, sup$confirmed)
+  expect_warning(bare <- line_supports(ln, NULL, utm), "every vertex")
+  expect_true(all(bare$use))
+
+  # With the bend vertex dropped, the chord at mid-line is the end-to-end
+  # chord: ground + attach_m over flat ground, so 20 m. Measured returns at
+  # 25 m sit above it and are counted, not discarded.
+  s <- segment_lines(ln, utm, seg_m = 100)
+  dtm <- make_rasters(data.frame(x = x0 + 1, y = y0 + 40, h = 0.5))$dtm
+  w <- data.table::data.table(X = x0 + seq(80, 120, 0.5), Y = y0 + 0.4, height_m = 25,
+                              pred = factor("wire", levels = label_levels),
+                              label = factor("wire", levels = label_levels))
+  prof <- conductor_profile(w, s, dtm, supports = sup[sup$use, ], min_ground_clear_m = 5, attach_m = 20,
+                            search_m = 15)
+  b <- attr(prof, "bins")
+  expect_gt(b$n_measured, 0)
+  expect_equal(b$n_above_upper_bound, b$n_measured)
+  expect_equal(prof$z_lo[which.min(abs(prof$s_m - 100))], 25, tolerance = 0.01)
 })
 
 test_that("strike trees carry a stable id and the profile reports its rejected bins (#31, #24)", {
@@ -153,7 +230,11 @@ test_that("taut-span upper bound bridges a gully instead of following it", {
   ground <- ifelse(abs(s - 150) < 50, -30 * (1 - abs(s - 150) / 50), 0) # 30 m V-gully
   up <- taut_upper(s, ground + 18, max_span = 250, step = 5)
   expect_equal(up[s == 150], 18, tolerance = 0.5)   # chord between the rims
-  expect_equal(up[s == 0], 18, tolerance = 0.5)
+  expect_equal(up[s == 50], 18, tolerance = 0.5)
+  # No chord straddles a line end, so the bound is unknown there, not
+  # "ground + attachment" as if a support stood at the data's edge (#51).
+  expect_true(is.infinite(up[s == 0]))
+  expect_true(is.infinite(up[s == 300]))
   short <- taut_upper(s, ground + 18, max_span = 20, step = 5)
   expect_lt(short[s == 150], 0)                    # short spans must follow terrain
 })

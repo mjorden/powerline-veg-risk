@@ -39,6 +39,7 @@ pale end of the risk ramp. Line type is the confidence: dashed where the
 tier depends on the unknown conductor elevation, dotted where too little
 of the corridor was observed to claim no risk (\code{"no data"}). Cells the
 LiDAR did not observe are drawn grey and their area is reported, so
-unseen never reads as clear. Strike trees are ink dots (both bounds) or
-paper dots (one bound); supports used for the upper bound are crosses.
+unseen never reads as clear. Strike trees are ink dots (strike at every
+plausible conductor height) or paper dots (at some); supports used for
+the upper bound are crosses.
 }

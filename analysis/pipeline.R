@@ -154,13 +154,17 @@ run_case_study <- function(cfg) {
   # --- 4. Conductor model -----------------------------------------------------
   segments <- segment_lines(study, crs, seg_m = 50)
   rasters <- corridor_rasters(las, pred, res_m = 1, drop = vendor_bldg)
-  # Supports: tagged OSM poles/towers plus the vertices of the *unclipped*
-  # line (OSM mappers put a node at each structure; clipping adds end points
-  # that are not structures). Supports outside the data are dropped.
-  supports <- st_sf(geometry = c(st_geometry(st_transform(structures, crs)),
-                                 st_geometry(line_vertex_points(st_transform(lines, crs)))))
-  # Masking also covers the towers of other circuits sharing the corridor.
-  mask_supports <- st_sf(geometry = c(st_geometry(supports),
+  # Supports for the upper bound: vertices of the *unclipped* line that a
+  # tagged pole or tower confirms (#51); every vertex only when none is
+  # tagged. Supports outside the data are dropped downstream.
+  all_supports <- line_supports(lines, structures, crs)
+  supports <- all_supports[all_supports$use, ]
+  step(sprintf("supports: %d line vertices, %d confirmed by tagged structures, %d used for the upper bound",
+               nrow(all_supports), sum(all_supports$confirmed), nrow(supports)))
+  # Masking is the conservative direction: every tagged structure and every
+  # vertex of every circuit sharing the corridor.
+  mask_supports <- st_sf(geometry = c(st_geometry(st_transform(structures, crs)),
+                                      st_geometry(line_vertex_points(st_transform(lines, crs))),
                                       st_geometry(line_vertex_points(st_transform(context, crs)))))
   profile <- conductor_profile(pred, segments, rasters$dtm, supports = supports,
                                search_m = cfg$wire_search_m, structure_mask_m = cfg$structure_mask_m,
@@ -168,8 +172,9 @@ run_case_study <- function(cfg) {
   step(sprintf("conductor measured along %.0f%% of the line; upper bound unknown along %.0f%%",
                100 * mean(profile$src == "measured"), 100 * mean(is.infinite(profile$z_hi))))
   bl <- colSums(attr(profile, "bins")[, -1])
-  step(sprintf("conductor bins: %d with returns; rejected %d (too few points), %d (below code minimum), %d (implausible slope); %d measured",
-               bl[["n_bins"]], bl[["n_too_few"]], bl[["n_below_floor"]], bl[["n_implausible"]], bl[["n_measured"]]))
+  step(sprintf("conductor bins: %d with returns; rejected %d (too few points), %d (below code minimum), %d (implausible slope); %d measured, %d of them above the support chord",
+               bl[["n_bins"]], bl[["n_too_few"]], bl[["n_below_floor"]], bl[["n_implausible"]], bl[["n_measured"]],
+               bl[["n_above_upper_bound"]]))
   # Parameters that assess_risk() and wind_fall_exposure() must agree on
   # come from the config once (#21).
   growth_m <- if (is.null(cfg$growth_m)) 0 else cfg$growth_m
@@ -284,6 +289,9 @@ run_case_study <- function(cfg) {
   step(sprintf("excluded %s wire-like conductor-envelope points from the canopy model",
                format(rasters$n_conductor_excluded, big.mark = ",")))
   print(table(optimistic = risk$segments$priority, pessimistic = risk$segments$priority_lo))
+  step(sprintf("strike trees: %d at some plausible conductor height, %d at every plausible height (%d / %d at the lower / upper bound alone)",
+               sum(risk$trees$strike_possible), sum(risk$trees$strike_certain),
+               sum(risk$trees$strike_lo), sum(risk$trees$strike_hi)))
   print(table(risk$segments$confidence))
   step(sprintf("LiDAR coverage: %d uncertain points excluded; segment coverage median %.2f, min %.2f (under line min %.2f); %d 'no data'",
                ours$rasters$n_uncertain_excluded, stats::median(risk$segments$frac_observed),
@@ -421,7 +429,9 @@ run_case_study <- function(cfg) {
                   frac_unbounded = mean(is.infinite(profile$z_hi)),
                   priority = table(risk$segments$priority),
                   priority_by_confidence = table(risk$segments$priority, risk$segments$confidence),
-                  n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi)),
+                  n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi),
+                               possible = sum(risk$trees$strike_possible), certain = sum(risk$trees$strike_certain)),
+                  supports = c(vertices = nrow(all_supports), confirmed = sum(all_supports$confirmed), used = nrow(supports)),
                   n_conductor_excluded = rasters$n_conductor_excluded,
                   landsat = if (!is.null(dryness)) attr(dryness$segments, "landsat"),
                   landsat_scenes = if (!is.null(dryness)) scene_counts,

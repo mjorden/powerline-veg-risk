@@ -238,8 +238,9 @@ unobserved_cells <- function(rasters, seg, crs) {
 #' tier depends on the unknown conductor elevation, dotted where too little
 #' of the corridor was observed to claim no risk (`"no data"`). Cells the
 #' LiDAR did not observe are drawn grey and their area is reported, so
-#' unseen never reads as clear. Strike trees are ink dots (both bounds) or
-#' paper dots (one bound); supports used for the upper bound are crosses.
+#' unseen never reads as clear. Strike trees are ink dots (strike at every
+#' plausible conductor height) or paper dots (at some); supports used for
+#' the upper bound are crosses.
 #'
 #' @param rasters Output of [corridor_rasters()].
 #' @param risk Output of [assess_risk()].
@@ -269,8 +270,9 @@ plot_risk_map <- function(rasters, risk, structures = NULL, encroach_limits = c(
   pos <- seg[!seg$zero & !gap, ]
   top <- if (is.na(encroach_limits[2])) max(c(1, pos$encroach_lo_m2), na.rm = TRUE) else encroach_limits[2]
   strike <- risk$trees[risk$trees$strike, ]
-  strike$both <- factor(ifelse(strike$strike_lo & strike$strike_hi, "under both bounds", "under one bound"),
-                        levels = c("under both bounds", "under one bound"))
+  strike$both <- factor(ifelse(strike$strike_certain, "at every plausible conductor height",
+                               "at some plausible height"),
+                        levels = c("at every plausible conductor height", "at some plausible height"))
   un <- unobserved_cells(rasters, seg, crs)
 
   p <- ggplot2::ggplot() +
@@ -288,13 +290,13 @@ plot_risk_map <- function(rasters, risk, structures = NULL, encroach_limits = c(
     p <- p +
       # Ink dot with a paper rim / paper dot with an ink rim: legible on
       # both the palest and the darkest canopy.
-      ggplot2::geom_sf(data = strike[strike$both == "under one bound", ], ggplot2::aes(shape = both),
+      ggplot2::geom_sf(data = strike[strike$both == "at some plausible height", ], ggplot2::aes(shape = both),
                        size = 1.8, stroke = 0.45, fill = pal$paper, colour = pal$strike_line,
                        show.legend = "point") +
-      ggplot2::geom_sf(data = strike[strike$both == "under both bounds", ], ggplot2::aes(shape = both),
+      ggplot2::geom_sf(data = strike[strike$both == "at every plausible conductor height", ], ggplot2::aes(shape = both),
                        size = 1.8, stroke = 0.3, fill = pal$strike_fill, colour = pal$paper,
                        show.legend = FALSE) +
-      ggplot2::scale_shape_manual(values = c(`under both bounds` = 21, `under one bound` = 21),
+      ggplot2::scale_shape_manual(values = c(`at every plausible conductor height` = 21, `at some plausible height` = 21),
                                   name = "Strike trees", drop = FALSE,
                                   guide = ggplot2::guide_legend(
                                     order = 3, title.position = "top", ncol = 1, direction = "vertical",
@@ -342,8 +344,8 @@ plot_risk_map <- function(rasters, risk, structures = NULL, encroach_limits = c(
   if (!is.null(st) && nrow(st) > 0) notes <- c(notes, "Crosses: supports used for the upper conductor bound.")
   p <- p +
     ggplot2::labs(title = title,
-                  subtitle = paste(c(sprintf("Potential strike trees: %d if the conductor is at code minimum, %d at the optimistic bound.",
-                                             sum(risk$trees$strike_lo), sum(risk$trees$strike_hi)),
+                  subtitle = paste(c(sprintf("Potential strike trees: %d at some plausible conductor height, %d at every plausible height.",
+                                             sum(risk$trees$strike_possible), sum(risk$trees$strike_certain)),
                                      sprintf("%.0f m segments | %s | OSM line geometry", stats::median(seg$length_m), source),
                                      notes), collapse = "\n")) +
     map_frame(crs, seg)
@@ -402,7 +404,7 @@ plot_profile <- function(profile, risk = NULL, attach_m = NA, line_id = NULL, fi
     keep <- pj$line_id == line_id
     if (any(keep)) {
       trees <- data.frame(s_m = pj$s_m[keep], z = profile$ground[pj$vertex[keep]],
-                          both = tr$strike_lo[keep] & tr$strike_hi[keep])
+                          both = tr$strike_certain[keep])
     }
   }
 
@@ -427,7 +429,7 @@ plot_profile <- function(profile, risk = NULL, attach_m = NA, line_id = NULL, fi
     if (nrow(bnd)) paste0("Band: ground + NESC clearance (thin line) up to the chord between supports",
                           if (!is.na(attach_m)) sprintf(" at ground + %g m", attach_m) else "", "."),
     if (nrow(bnd) && any(is.na(pr$z_hi) & pr$src == "bounded")) "No band: the next support lies outside the data.",
-    if (!is.null(trees)) sprintf("Triangles: %d potential strike trees at their base elevation (ink = under both bounds).",
+    if (!is.null(trees)) sprintf("Triangles: %d potential strike trees at their base elevation (ink = at every plausible conductor height).",
                                  nrow(trees)),
     if (length(lines) > 1) sprintf("Line %s of %d.", line_id, length(lines))
   )
