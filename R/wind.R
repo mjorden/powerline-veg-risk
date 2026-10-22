@@ -247,7 +247,7 @@ aoi_lonlat <- function(aoi) {
 #' @param aoi An `sf`/`sfc` object (any CRS) or a `bbox`.
 #' @param api NWS API root.
 #' @return A tibble with the same columns as [wind_history()]; attributes
-#'   `office`, `grid` and `updated`.
+#'   `office`, `grid`, `updated` (when the NWS grid was issued) and `generated`.
 #' @export
 nws_forecast <- function(aoi, api = nws_api) {
   ll <- aoi_lonlat(aoi)
@@ -256,6 +256,9 @@ nws_forecast <- function(aoi, api = nws_api) {
   out <- parse_nws_grid(grid$properties)
   attr(out, "office") <- pt$properties$gridId
   attr(out, "grid") <- paste(pt$properties$gridX, pt$properties$gridY, sep = ",")
+  # When the grid was issued, so a watchlist can say which forecast it used.
+  attr(out, "updated") <- grid$properties$updateTime %||% NA_character_
+  attr(out, "generated") <- grid$properties$generatedAt %||% NA_character_
   out
 }
 
@@ -371,6 +374,7 @@ forecast_watchlist <- function(risk, forecast, alerts = NULL, min_gust_ms = NULL
     rlang::abort("`risk$trees` has no hitting arcs: run `wind_fall_exposure()` first.")
   }
 
+  updated <- attr(forecast, "updated")
   past <- !is.na(forecast$time) & forecast$time < trunc(now, "hours")
   forecast <- forecast[!past, ]
 
@@ -385,7 +389,7 @@ forecast_watchlist <- function(risk, forecast, alerts = NULL, min_gust_ms = NULL
 
   settings <- list(min_gust_ms = min_gust_ms, max_rh = max_rh, spread_deg = spread_deg,
                    bound = bound, now = now, n_past_hours_dropped = sum(past),
-                   n_forecast_hours = nrow(forecast))
+                   n_forecast_hours = nrow(forecast), forecast_updated = updated)
   empty <- tibble::tibble(seg_id = integer(), first_hour = as.POSIXct(character(), tz = "UTC"),
                           n_hours = integer(), max_gust_ms = numeric(), min_rh_pct = numeric(),
                           n_trees_exposed = integer(), red_flag = logical(), dry_grow_in = logical())

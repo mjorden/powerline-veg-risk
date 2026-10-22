@@ -3,7 +3,14 @@ url: https://mjorden.github.io/powerline-veg-risk/
 template:
   bootstrap: 5
   bslib:
-    primary: "#1f3b73"
+    # The midmod figure palette (R/plot.R): parchment, dark ink, teal accent.
+    bg: "#F4EEDE"
+    fg: "#3B2A1E"
+    primary: "#1F95B2"
+    secondary: "#6B5744"
+    base_font: "Charter, 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif"
+    heading_font: "Futura, 'Avenir Next', 'Century Gothic', 'Gill Sans', sans-serif"
+    code_font: "Menlo, Consolas, monospace"
 
 navbar:
   structure:

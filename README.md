@@ -3,7 +3,7 @@
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/mjorden/powerline-veg-risk/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/mjorden/powerline-veg-risk/actions/workflows/R-CMD-check.yaml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
-[![pkgdown site](https://img.shields.io/badge/docs-pkgdown-1f3b73.svg)](https://mjorden.github.io/powerline-veg-risk/)
+[![pkgdown site](https://img.shields.io/badge/docs-pkgdown-1F95B2.svg)](https://mjorden.github.io/powerline-veg-risk/)
 <!-- badges: end -->
 
 **Which trees threaten a power line? A screen from public airborne LiDAR, in R.**
