@@ -22,12 +22,14 @@ After the sanity checks, conductor returns survive along 2% of the line, and spa
 
 | | optimistic conductor (upper bound) | pessimistic conductor (code minimum) |
 |---|---|---|
-| segments with ≥ 5 m² of canopy in the clearance envelope | **3 of 30** | 28 of 30 |
-| potential strike trees | 33 | 322 |
+| segments with ≥ 5 m² of canopy inside the clearance target | **3 of 30** | 30 of 30 |
+| potential strike trees | 13 | 133 |
+
+Clearance is radial: the 3D distance from the canopy column to the outer phase, scored out to 14 m either side of the centreline (the conductor returns reach 13.5 m). Strike trees stand beyond that zone; the optimistic count takes trees that reach the conductor at every plausible elevation inside its bracket, the pessimistic count those that reach it at some plausible elevation. Supports for the upper bound are the 5 tagged H-frames; the 9 other vertices of the OSM way are bends, not structures.
 
 - **3 robust grow-in candidates.** The top one (about 1.01–1.06 km along the line, conductor measured along 41% of it) has a conductor about 15 m up, leaving a low H-frame on the canyon floor, beside riparian cottonwoods up to 27 m tall. The other two have trees of 20–29 m that exceed even the highest plausible conductor. They are the places to verify with imagery or a field visit first.
 - **27 segments are bound-dependent.** Whether they need work depends on where the conductor actually is, which this acquisition doesn't show.
-- **The LiDAR saw the corridor.** Every segment has at least 94% of its corridor and 85% of its grow-in zone observed (median 100%), so none is tiered `no data`.
+- **The LiDAR saw the corridor.** Every segment has at least 94% of its corridor and 88% of its grow-in zone observed (median 100%), so none is tiered `no data`.
 
 ## Wires do not generalise across space here
 
@@ -45,16 +47,16 @@ With only a few hundred metres of labelled conductor and five structures, wires 
 
 ## The grown-in canopy is not the dry canopy
 
-A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, covers the corridor with 266 pixels. Only 63 are scored: 99 are under half canopy, and 104, mostly along the corridor edge and inside the bend, are less than 80% observed by the LiDAR, so their reflectance would describe land outside the clip. 15 of the 30 segments rest on at least two scored pixels and 5 m² of grown-in canopy and get a percentile; the others keep their index but aren't ranked. NDVI and NDMI agree closely across the ranked segments (r = 0.93).
+A dry-season (July–September) median of 25 Landsat 8 scenes from 2019–2021, bracketing the 2020 flight, covers the corridor with 266 pixels. Only 63 are scored: 99 are under half canopy, and 104, mostly along the corridor edge and inside the bend, are less than 80% observed by the LiDAR, so their reflectance would describe land outside the clip. 20 of the 30 segments rest on at least two scored pixels and 5 m² of grown-in canopy and get a percentile; the others keep their index but aren't ranked. NDVI and NDMI agree closely across the ranked segments (r = 0.91).
 
-| robust grow-in candidate | scored pixels | NDVI percentile | NDMI percentile |
-|---|---:|---:|---:|
-| 0.10–0.15 km, trees to 20 m | 3 | 0.76 | 0.68 |
-| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 1 | not ranked | not ranked |
-| 1.06–1.11 km, canyon floor, trees to 29 m | 3 | 0.90 | 0.95 |
+| robust grow-in candidate | NDVI percentile | NDMI percentile |
+|---|---:|---:|
+| 0.10–0.15 km, trees to 20 m | 0.70 | 0.65 |
+| 1.01–1.06 km, riparian cottonwoods on the canyon floor (top candidate) | 0.41 | 0.86 |
+| 1.06–1.11 km, canyon floor, trees to 29 m | 0.92 | 0.95 |
 
-- **Neither ranked grow-in candidate is dry;** both sit in the greener half of the corridor, and the 1.06–1.11 km segment is among the wettest canopy on the line (riparian trees on the canyon floor). The top candidate at 1.01–1.06 km can't be ranked: its riparian strip fills only one scored pixel, and one mixed 30 m pixel can't carry a percentile.
-- **The 2 driest segments** (lowest NDVI quarter: 0.05–0.10 and 0.46–0.51 km) are both bound-dependent: grow-in only if the conductor is at the code minimum. If the conductor turns out to be low there, encroachment and dry fuel coincide, so these come first among the 27 undecidable segments.
+- **None of the three grow-in candidates is dry.** Two sit in the greener half of the corridor, and the 1.06–1.11 km segment is among the wettest canopy on the line (riparian trees on the canyon floor). The top candidate at 1.01–1.06 km is middling by greenness but among the wettest by NDMI, which is what riparian cottonwoods look like from orbit.
+- **The 3 driest segments** (lowest NDVI quarter: 0.05–0.10, 0.46–0.51 and 1.22–1.27 km) are all bound-dependent: grow-in only if the conductor is at the code minimum. If the conductor turns out to be low there, encroachment and dry fuel coincide, so these come first among the 27 undecidable segments.
 
 ![Sunshine canopy dryness](../reference/figures/sunshine_canopy_dryness.png)
 
@@ -64,14 +66,14 @@ Over 2015–2024 there were 609 fire-weather hours (gusts ≥ 15.2 m/s, RH ≤ 3
 
 | | potential strike trees | windward (≥ 50% of fire-weather hours) | wind-weighted strike-tree count |
 |---|---:|---:|---:|
-| pessimistic conductor (code minimum) | 322 | 138 | 137 |
-| optimistic conductor (upper bound) | 33 | 18 | 18 |
+| pessimistic: strikes at some plausible conductor height | 133 | 44 | 44 |
+| optimistic: strikes at every plausible height | 13 | 7 | 7 |
 
 The wind-weighted count is the sum over strike trees of the share of fire-weather hours that would throw each one into the line: how many trees a typical fire-weather hour's winds point at the conductors, *if they fell*. It carries no failure probability.
 
-- **The split is close to all-or-nothing.** Windward trees are hit in 95% of fire-weather hours on average; the median leeward tree is hit in 1%. (Fall-in reach is the minimum 3D distance along the span, so trees that reach a lower point of a sloping conductor a few metres along the line count too; that is why the counts exceed the nearest-station figures an earlier version reported.)
-- **Under the optimistic bound, the top grow-in candidate also has the most windward strike trees:** 9 of its 16, at 1.01–1.06 km. It is the segment to verify first on both counts.
-- **The two dry segments** (0.05–0.10 and 0.46–0.51 km) have 14 and 8 potential strike trees under the pessimistic bound, of which 4 and 3 are windward.
+- **The split is close to all-or-nothing.** Windward trees are hit in 90% of fire-weather hours on average; the median leeward tree is hit in 1%.
+- **The top grow-in candidate also has the most windward strike trees:** 5 of its 8 that strike at every plausible conductor height, at 1.01–1.06 km. It is the segment to verify first on both counts.
+- **The three dry segments** (0.05–0.10, 0.46–0.51 and 1.22–1.27 km) have 5, 2 and 1 potential strike trees, of which 0, 1 and 1 are windward.
 
 ![Sunshine wind exposure](../reference/figures/sunshine_wind_exposure.png)
 

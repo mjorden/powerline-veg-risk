@@ -270,9 +270,9 @@ plot_risk_map <- function(rasters, risk, structures = NULL, encroach_limits = c(
   pos <- seg[!seg$zero & !gap, ]
   top <- if (is.na(encroach_limits[2])) max(c(1, pos$encroach_lo_m2), na.rm = TRUE) else encroach_limits[2]
   strike <- risk$trees[risk$trees$strike, ]
-  strike$both <- factor(ifelse(strike$strike_certain, "at every plausible conductor height",
-                               "at some plausible height"),
-                        levels = c("at every plausible conductor height", "at some plausible height"))
+  strike$both <- factor(ifelse(strike$strike_certain, "every plausible height",
+                               "some plausible height"),
+                        levels = c("every plausible height", "some plausible height"))
   un <- unobserved_cells(rasters, seg, crs)
 
   p <- ggplot2::ggplot() +
@@ -290,13 +290,13 @@ plot_risk_map <- function(rasters, risk, structures = NULL, encroach_limits = c(
     p <- p +
       # Ink dot with a paper rim / paper dot with an ink rim: legible on
       # both the palest and the darkest canopy.
-      ggplot2::geom_sf(data = strike[strike$both == "at some plausible height", ], ggplot2::aes(shape = both),
+      ggplot2::geom_sf(data = strike[strike$both == "some plausible height", ], ggplot2::aes(shape = both),
                        size = 1.8, stroke = 0.45, fill = pal$paper, colour = pal$strike_line,
                        show.legend = "point") +
-      ggplot2::geom_sf(data = strike[strike$both == "at every plausible conductor height", ], ggplot2::aes(shape = both),
+      ggplot2::geom_sf(data = strike[strike$both == "every plausible height", ], ggplot2::aes(shape = both),
                        size = 1.8, stroke = 0.3, fill = pal$strike_fill, colour = pal$paper,
                        show.legend = FALSE) +
-      ggplot2::scale_shape_manual(values = c(`at every plausible conductor height` = 21, `at some plausible height` = 21),
+      ggplot2::scale_shape_manual(values = c(`every plausible height` = 21, `some plausible height` = 21),
                                   name = "Strike trees", drop = FALSE,
                                   guide = ggplot2::guide_legend(
                                     order = 3, title.position = "top", ncol = 1, direction = "vertical",
