@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Review complete; findings not yet filed as issues |
+| **Status** | Review complete; findings filed as #49 to #71 |
 | **Author** | Matt Jorden (review run with four parallel reviewer lenses plus a regulatory research pass) |
 | **Reviewed** | `main` at ef0382e (after PRs #44 to #47) |
 | **Companion** | RFC 0001 (the twin), revised the same day; the roadmap in `vignettes/articles/limits-and-roadmap.Rmd` |
@@ -146,6 +146,32 @@ Written last and atomically as `manifest.json`; readers refuse a run directory w
 - Outputs: per file {path, sha256, bytes, rows, columns with type, unit and levels, crs}; captured warnings; step timings; counts.
 - Watchlist runs add: parent run id and segment hash, NWS points URL, grid, `updateTime`, `generatedAt`, alert ids, raw JSON hashes, thresholds, bound, user agent.
 
-## Part 4: Filing recommendation
+## Part 4: Issues filed
 
-File as issues, one each, in this order: A1, A2, A3, D1, D2+D3 (one issue: spans and identity), C1+C2+C3 (one issue: run manifest and versioned outputs, superseding the closed #9/#15), B1+B2+B3 (one issue: chunked processing), B4+C4+C5 (one issue: content-addressed caches and pinned inputs), B5+B7 (one issue: `vegrisk_run()` with validation and typed outcomes), A4, A5, A6, A7+D7 (distribution), B6, A9, C6, C8+C9 (weather clients and terms), A8, D8 (physics, superseding the closed #7/#24). The remaining low findings go in a single "small fixes" issue. Label each with the RFC phase.
+Filed on 21 October 2026, in this order, each labelled with its RFC phase.
+
+| Issue | Findings | Phase |
+|---|---|---|
+| #49 fall-in tested only at the two bounds | A1 | 1, 2 |
+| #50 vertical-only clearance in a fixed band | A2 | 1, 2 |
+| #51 unfiltered support set behind the upper bound | A3 | 1, 2 |
+| #52 data vintage: GPS time, project, checksums | D1, C5 | 1 |
+| #53 stable identity and structure-to-structure spans | D2, D3, B11, A11, D11 | 1 |
+| #54 run manifest, versioned outputs, atomic completion | C1, C2, C3, C6, C13, D4, D13 | 0, 1 |
+| #55 chunked, corridor-masked processing | B1, B2, B3, B10 | 1 |
+| #56 content-addressed caches and pinned inputs | B4, C4, C5, C7 | 1 |
+| #57 `vegrisk_run()` with validation and typed outcomes | B5, B7, B9 | 1 |
+| #58 disagreement exclusion leaves a cell observed | A4 | 1 |
+| #59 masked area counted as observed | A5 | 1 |
+| #60 Sunshine envelope warning | A6 | 1 |
+| #61 distribution-line presets | A7, D7 | 1 |
+| #62 one regional model, thread budgets | B6 | 1 |
+| #63 per-fold CV spread, out-of-fold vendor scoring | A9, A10 | 1, 4 |
+| #64 weather clients, Open-Meteo terms, NWS reproducibility | C8, C9, B8 | 1 |
+| #65 crown-support filter and label radii | A8, A15, A16 | 1 |
+| #66 conductor physics | D8, A12 | 2 |
+| #67 output schema, determinism, Landsat hygiene, packaging | C10-C15, B12, B13, B15-B17, A13, A14 | 1 |
+| #68 tests before the refactor | B14 | 1 |
+| #69 compound CRS and canonical output CRS | D9 | 0, 1 |
+| #70 hand-labelled test set | D10 | 1 |
+| #71 vegetation-contact index and consequence | D12 | 3 |
