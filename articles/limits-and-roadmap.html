@@ -69,12 +69,16 @@
 
     
     
-<p><code>vegrisk</code> was built as a portfolio project and is closed
-out as one. Two four-lens reviews (science, reproducibility, API,
-graphics) filed 31 issues against it; the cheap and the trust-affecting
-ones were fixed, and the rest are recorded here with the reasons they
-stay open. The repository’s issue tracker links each item to its
-discussion.</p>
+<p><code>vegrisk</code> was built as a portfolio project and closed out
+as one: two four-lens reviews filed 31 issues, the cheap and
+trust-affecting ones were fixed, and the rest were recorded here. A
+third review in October 2026
+(<code>rfcs/0002-code-review-and-twin-readiness.md</code>) asked a
+harder question: what would it take to make this the vegetation layer of
+a wildfire-risk digital twin for a Colorado utility, as
+<code>rfcs/0001-wildfire-risk-digital-twin.md</code> proposes. The
+limits below include what that review found; the roadmap is rewritten
+around the twin.</p>
 <div class="section level2">
 <h2 id="limits">Limits<a class="anchor" aria-label="anchor" href="#limits"></a>
 </h2>
@@ -105,9 +109,42 @@ the LiDAR flight. There is no allowance for maximum operating sag
 (temperature or load), ice, or wind blowout, and the lateral phase
 position is one symmetric offset from the OSM centreline even though the
 repo records a misregistered centreline at Nashville. A measured
-conductor is treated as a point height per 5 m bin, not a band, and bins
-rejected by the sanity checks are dropped without being reported. All of
-this makes the screen optimistic by the sag and blowout envelope.</li>
+conductor is treated as a point height per 5 m bin, not a band; the bins
+the sanity checks reject are counted and reported
+(<code>attr(profile, "bins")</code>) but not shown on the figures. All
+of this makes the screen optimistic by the sag and blowout
+envelope.</li>
+<li>
+<strong>Fall-in is tested only at the two conductor bounds.</strong>
+Reach is smallest when the conductor is level with the tree’s base, so a
+tree whose base lies between the lower and upper bound can strike at an
+elevation inside the bracket while striking at neither bound; such a
+segment reads <code>robust none</code> when it is bound-dependent.
+Canyon spans are where this applies. (October 2026 review, finding
+A1.)</li>
+<li>
+<strong>Grow-in clearance is vertical, inside a fixed band.</strong>
+A crown just outside the outer phase with its top at conductor height is
+neither in the grow-in zone nor a strike tree, although it is the
+classic side-growth and blow-in contact; the standards measure radial
+clearance. (A2.)</li>
+<li>
+<strong>The upper bound trusts every mapped pole and every line
+vertex as a support.</strong> A distribution tap pole or a bend vertex
+near mid-span over a gully puts the chord below where the conductor can
+be, and nothing checks that measured bins fall inside the bracket.
+(A3.)</li>
+<li>
+<strong>Masked area counts as observed.</strong> Cells under the
+structure mask, including discs around every vertex of every context
+line, are not scored but are counted as observed, and the masked share
+is not reported. (A5.)</li>
+<li>
+<strong>The Sunshine run exceeded its own conductor
+envelope.</strong> Conductor returns reach 13.5 m from the OSM
+centreline while the grow-in zone is 6 m; returns over canopy between
+those distances stayed in the canopy model, as the pipeline’s warning
+said. (A6.)</li>
 <li>
 <strong>Wire labels are trusted.</strong> A wire label requires an
 observed air gap beneath it, so cells holding only wire-labelled returns
@@ -144,9 +181,16 @@ merge or split crowns in dense stands.</li>
 <strong>Spatial cross-validation has no buffer</strong> between
 blocks, and the metrics are single-seed point estimates. The 30 m
 feature neighbourhoods and the labelling windows reach across block
-edges, so the spatial numbers are somewhat optimistic; the large gaps
-(0.21 vs 0.003) are robust, the small ones (0.88 vs 0.83) should not be
-read without a fold-level spread.</li>
+edges, so the spatial numbers are somewhat optimistic. At Sunshine 76%
+of the wire points fall in one fold and none in another, so the headline
+gap (0.20 random vs 0.005 spatial) rests on effectively one held-out
+block group and should be read as a direction, not a measurement, until
+per-fold spreads are reported. (A9.)</li>
+<li>
+<strong>The weak-label model’s vendor evaluation is
+in-sample</strong>: the model is scored on the points it trained on, so
+its row in the Nashville vendor table is not like-for-like with the
+spatial-CV reference. (A10.)</li>
 <li>
 <strong>Vertical units</strong> are assumed to match horizontal
 units (true for both deliveries: metres/metres and US survey feet/US
@@ -171,61 +215,225 @@ the winds point at the line, not how many will fall.</li>
 </ul>
 </div>
 <div class="section level2">
-<h2 id="roadmap">Roadmap<a class="anchor" aria-label="anchor" href="#roadmap"></a>
+<h2 id="roadmap-from-a-corridor-screen-to-the-vegetation-layer-of-a-twin">Roadmap: from a corridor screen to the vegetation layer of a
+twin<a class="anchor" aria-label="anchor" href="#roadmap-from-a-corridor-screen-to-the-vegetation-layer-of-a-twin"></a>
 </h2>
-<p>What a next version would change, in the order it should happen. Each
-entry closes a review issue; the issue number is the place to read the
-full argument.</p>
+<p>Rewritten after the October 2026 review. The target is RFC 0001’s
+twin for a Colorado utility; Colorado’s Public Utilities Commission
+opened rulemaking 26R-0355E in September 2026 to require Wildfire
+Mitigation Plans with likelihood-and-consequence assessments tied to
+equipment and an independent check, so an auditable vegetation layer is
+the first thing the twin needs. Each stage below ends in something
+usable on its own. Finding ids (A1, B4, …) refer to RFC 0002.</p>
+<div class="section level3">
+<h3 id="stage-0-fix-what-a-spans-state-means-weeks-all-s-or-m">Stage 0: fix what a span’s state means (weeks, all S or M)<a class="anchor" aria-label="anchor" href="#stage-0-fix-what-a-spans-state-means-weeks-all-s-or-m"></a>
+</h3>
 <ol style="list-style-type: decimal">
 <li>
-<strong>Conductor physics (#7, #24).</strong> Add a sag and blowout
-allowance from conductor type, span length and a design temperature, use
-per-vertex lateral phase positions, report the measured conductor as a
-band rather than a point, and report rejected bins. This is Phase 1 of
-the digital-twin RFC in
-<code>rfcs/0001-wildfire-risk-digital-twin.md</code>.</li>
+<strong>Strike test over the whole bracket</strong> (A1, #49): per
+vertex, clamp the tree’s base elevation into [<code>z_lo</code>,
+<code>z_hi</code>] and report <code>strike_possible</code> and
+<code>strike_certain</code>; build <code>confidence</code> from those
+two. Test with a tree base between the bounds.</li>
 <li>
-<strong>An explicit result object (#9).</strong> Run parameters and
-provenance travel as R attributes today and are lost by
-<code>st_write()</code> and <code><a href="https://rdrr.io/r/base/readRDS.html" class="external-link">saveRDS()</a></code>. A
-<code>vegrisk_risk</code> object with <code>$params</code> and
-<code>$provenance</code> and a validator, and a composite returned as
-<code>list(raster, scenes, dates)</code>, would fix that once for every
-downstream step.</li>
+<strong>Radial clearance</strong> (A2, #50): score cells out to
+<code>phase_offset_m + clearance_target_m</code> with the 3D distance
+from the conductor, and abort when <code>under_line_m</code> is narrower
+than that.</li>
 <li>
-<strong>Run manifest and parameter-keyed caches (#15).</strong> The
-run id, git SHA and reuse record now land in <code>summary.rds</code>; a
-manifest listing every input (tile checksums, OSM snapshot time, Landsat
-scene ids, the Open-Meteo model and NWS issuance time) and caches keyed
-by the parameters that produced them are the rest.</li>
+<strong>A real support set</strong> (A3, #51): only nodes that are
+members of the study way, matched on voltage or line membership; log
+measured bins that fall outside the bracket; <code>taut_upper()</code>
+returns unknown past the outermost chord.</li>
 <li>
-<strong>Keep identities (#31).</strong> Segments should carry the
-OSM way id, name, voltage and chainage; strike trees need a stable id so
-two runs can be compared tree by tree.</li>
+<strong>Uncertain tops make a cell unobserved</strong> (A4, #58),
+the masked share is reported and treated like low coverage (A5, #59),
+and the Sunshine envelope is widened and the warning recorded in the
+summary (A6, #60).</li>
 <li>
-<strong>One breaking-change pass (#21).</strong> Cross-stage
-parameters (<code>phase_offset_m</code>, <code>growth_m</code>,
-<code>under_line_m</code>, <code>half_width_m</code>) read from the
-result object instead of being typed again; consistent argument names
-and order; <code>quiet=</code> and <code>num_threads=</code>; version
-0.2.0 with a NEWS entry.</li>
-<li>
-<strong>Buffered spatial CV with fold-level spread (#19).</strong>
-Drop training points within the run window plus the feature radius of
-each test block, and report per-fold ranges or repeated block-CV. This
-changes the headline CV numbers, so it waits for the result object and
-the manifest.</li>
-<li>
-<strong>More public data (#3).</strong> Terrain and aspect,
-burn-probability surfaces, land-cover fuel classes and historical fire
-perimeters were proposed as further layers; each would get its own issue
-when picked up.</li>
-<li>
-<strong>A weekly live-API smoke test (#17).</strong> The unit tests
-run offline on synthetic data; the Overpass, TNM, STAC, Open-Meteo and
-NWS clients would benefit from a scheduled check with
-<code>skip_if_offline()</code>.</li>
+<strong>Per-fold CV spread and out-of-fold vendor scoring</strong>
+(A9, A10, #63), so the published numbers carry their uncertainty.</li>
 </ol>
+</div>
+<div class="section level3">
+<h3 id="stage-1-identity-time-and-provenance-phase-01-of-the-rfc-weeks">Stage 1: identity, time and provenance (Phase 0/1 of the RFC;
+weeks)<a class="anchor" aria-label="anchor" href="#stage-1-identity-time-and-provenance-phase-01-of-the-rfc-weeks"></a>
+</h3>
+<ol start="6" style="list-style-type: decimal">
+<li>
+<strong>Data vintage</strong> (D1, #52): read GPS time
+(<code>opt_select</code> gains <code>t</code>), convert to UTC, record
+min/median/max flight time per span, and keep the 3DEP project, TNM
+publication date and per-tile checksums.</li>
+<li>
+<strong>Stable keys</strong> (D2, B11, #53): trees keyed on a
+canonical-CRS position (NAD83(2011) / UTM 13N, EPSG:6342, rounded to 0.5
+m) with an epoch-matching table; lines numbered by input order; chainage
+measured along the OSM way, not the clipped window.</li>
+<li>
+<strong>Versioned, append-only outputs</strong> (D4, C2, C3, #54):
+GeoParquet partitioned by <code>run_id</code>, every row with
+<code>valid_from</code>, <code>valid_to</code>,
+<code>recorded_at</code>, <code>superseded_at</code>,
+<code>source</code>, <code>method_version</code>; a <code>runs</code>
+table; “current state” as a view; readers refuse a run with no
+manifest.</li>
+<li>
+<strong>The run manifest</strong> (C1, C5, C6, C13, #54):
+configuration and every resolved parameter, inputs with checksums and
+snapshot dates (Overpass <code>[date:]</code> pinning), the software
+environment (<code>renv.lock</code>, GDAL/GEOS/PROJ versions, thread
+counts, a dirty-tree check), captured warnings, and a completion status.
+The field list is in RFC 0002 Part 3.</li>
+<li>
+<strong>Content-addressed caches</strong> (B4, C4, C7, #56): every
+cache keyed by a hash of its request and upstream inputs, with the
+recorded arguments compared on load; model reuse gated on a training
+fingerprint.</li>
+</ol>
+</div>
+<div class="section level3">
+<h3 id="stage-2-spans-structures-and-a-territory-sized-runner-phase-1-months">Stage 2: spans, structures and a territory-sized runner (Phase 1;
+months)<a class="anchor" aria-label="anchor" href="#stage-2-spans-structures-and-a-territory-sized-runner-phase-1-months"></a>
+</h3>
+<ol start="11" style="list-style-type: decimal">
+<li>
+<strong>Structure and span tables</strong> (D3, A11, D11, #53): OSM
+tower and pole nodes with all their tags and node order, plus the way’s
+own vertices, deduplicated and snapped, with a LiDAR check for a
+vertical column of returns; lines split at structures into spans; the 1
+m profile and 5 m bins kept as a <code>span_station</code> child table;
+metrics aggregated per span (worst tier wins); implausible span lengths
+flagged and left without an upper bound. Protective-device sections
+arrive later as a versioned many-to-one grouping, never as the primary
+key.</li>
+<li>
+<strong>Chunked, bounded processing</strong> (B1, B2, B3, B10, #55):
+work in chainage windows buffered by the 30 m feature radius plus the 12
+m wire-run window, rasters masked to the corridor, <code>feat</code>
+carrying <code>X</code>, <code>Y</code>, <code>Zref</code> instead of
+indexing the point cloud by row, per-window writes to the store, no
+whole-territory object in memory.</li>
+<li>
+<strong>A library function, not a script</strong> (B5, B7, B9, #57;
+tests first, #68):
+<code>vegrisk_run(corridor, inputs, params, store)</code> with a
+validated parameter spec, typed outcomes (<code>ok</code>,
+<code>no_data</code>, <code>failed</code>), no working-directory
+assumptions, serialisable results (<code><a href="https://rspatial.github.io/terra/reference/wrap.html" class="external-link">terra::wrap()</a></code>, columns
+not attributes), and <code>watchlist.R</code> reading from the store
+with a run-id check.</li>
+<li>
+<strong>One regional model</strong> (B6, #62): trained offline on
+the labelled set, applied per corridor; cross-validation and ablation
+move to a scheduled validation job; thread counts become
+parameters.</li>
+<li>
+<strong>Query by polygon, throttle, time out</strong> (B8, C9, C8,
+C14, #64, #67): all clients through <code>vegrisk_request()</code>,
+per-host pacing, per-chunk polygons, the Open-Meteo product pinned and
+the commercial terms settled, NWS raw responses kept with the flagged
+hours.</li>
+<li>
+<strong>Colorado State Plane</strong> (D9, #69): parse the compound
+CRS, refuse a missing or mismatched vertical unit, store every output in
+EPSG:6342 metres, and run a regression test on the same tiles in CO
+North US survey feet.</li>
+</ol>
+</div>
+<div class="section level3">
+<h3 id="stage-3-distribution-lines-phase-1-months">Stage 3: distribution lines (Phase 1; months)<a class="anchor" aria-label="anchor" href="#stage-3-distribution-lines-phase-1-months"></a>
+</h3>
+<ol start="17" style="list-style-type: decimal">
+<li>
+<strong>Voltage-class presets</strong> (A7, D7, #61):
+<code>line_class</code> (T or D) from OSM <code>power</code> and voltage
+selects <code>wire_min_m</code>, <code>layer_m</code>, the clearance
+floor, attachment heights and the structure mask radius; a
+through-canopy conductor detector (linear, along-line, within the
+expected height band, ignoring the air gap); abstention for any thin
+elevated layer near a <code>minor_line</code>.</li>
+<li>
+<strong>Distribution metrics</strong>: overhang area and
+canopy-above-conductor fraction; distance-weighted strike counts instead
+of a binary flag that saturates; honest <code>bounded</code> reporting
+per span. Measure OSM <code>minor_line</code> coverage against NAIP
+before claiming the pilot covers distribution.</li>
+</ol>
+</div>
+<div class="section level3">
+<h3 id="stage-4-truth-phase-1-gis-labour">Stage 4: truth (Phase 1; GIS labour)<a class="anchor" aria-label="anchor" href="#stage-4-truth-phase-1-gis-labour"></a>
+</h3>
+<ol start="19" style="list-style-type: decimal">
+<li>
+<strong>The hand-labelled set</strong> (#70), by the protocol in RFC
+0002 Part 3: whole spans, stratified before results are seen, buffered
+from training blocks, double-labelled with kappa, with per-bin conductor
+elevation as derived truth; every published metric cites the label-set
+version.</li>
+<li>
+<strong>Crown filter and labels</strong> (A8, A15, A16, #65):
+pit-filled CHM before the crown-support filter, structure label radius
+tied to structure type, the small bookkeeping fixes.</li>
+</ol>
+</div>
+<div class="section level3">
+<h3 id="stage-5-conductor-physics-phase-2">Stage 5: conductor physics (Phase 2)<a class="anchor" aria-label="anchor" href="#stage-5-conductor-physics-phase-2"></a>
+</h3>
+<ol start="21" style="list-style-type: decimal">
+<li>
+<strong>A conservative sag first</strong> (D8, #66): parabola per
+measured span, maximum-temperature sag from the design temperature minus
+an estimated flight temperature (ERA5 temperature requested at flight
+time, IEEE 738 with an assumed load), as a lower bound on the conductor;
+then blowout from a design wind pressure as a lateral band; validated on
+spans flown on more than one date. FAC-003 MVCD selected by altitude per
+span.</li>
+<li>
+<strong>The wind arc from the per-vertex hit set</strong> (A12,
+#66).</li>
+</ol>
+</div>
+<div class="section level3">
+<h3 id="stage-6-a-vegetation-contact-index-and-consequence-phase-3">Stage 6: a vegetation-contact index and consequence (Phase 3)<a class="anchor" aria-label="anchor" href="#stage-6-a-vegetation-contact-index-and-consequence-phase-3"></a>
+</h3>
+<ol start="23" style="list-style-type: decimal">
+<li>
+<strong>A monotone, bounded index</strong> (D12, #71) from
+encroachment area, strike counts, wind hits and dryness, with
+<code>driver</code> and <code>model_version</code> columns, and
+<code>P(ignition)</code> left explicitly <code>NA</code> until utility
+data arrive.</li>
+<li>
+<strong>Pre-registered validation</strong> (#71): consequence
+against the Marshall (2021) and Fourmile Canyon (2010) loss footprints
+with a trivial baseline to beat; cross-checks against CO-WRA and
+Wildfire Risk to Communities; disagreements with Xcel’s filed risk tiers
+and PSPS footprints reported; field or imagery hit rates for the top
+grow-in and strike spans; the share of bound-dependent spans stated up
+front.</li>
+</ol>
+</div>
+<div class="section level3">
+<h3 id="left-as-recorded">Left as recorded<a class="anchor" aria-label="anchor" href="#left-as-recorded"></a>
+</h3>
+<ul>
+<li>
+<strong>Buffered spatial CV</strong> (#19 items 2 and 3) is folded
+into stage 0 item 5 and stage 4.</li>
+<li>
+<strong>The one breaking-change pass</strong> (#21) and the explicit
+result object (#9) are subsumed by stages 1 and 2: the store schema is
+the result object.</li>
+<li>
+<strong>More public data</strong> (#3): LANDFIRE fuels, Microsoft
+building footprints, NAIP for species groups, CSFS CO-WRA, MTBS/NIFC
+perimeters are now named per stage in RFC 0001’s pilot table.</li>
+<li>
+<strong>A weekly live-API smoke test</strong> (#17) joins stage 2
+item 15.</li>
+</ul>
+</div>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside>

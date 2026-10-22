@@ -1,10 +1,14 @@
 # Limits and roadmap
 
-`vegrisk` was built as a portfolio project and is closed out as one. Two
-four-lens reviews (science, reproducibility, API, graphics) filed 31
-issues against it; the cheap and the trust-affecting ones were fixed,
-and the rest are recorded here with the reasons they stay open. The
-repository’s issue tracker links each item to its discussion.
+`vegrisk` was built as a portfolio project and closed out as one: two
+four-lens reviews filed 31 issues, the cheap and trust-affecting ones
+were fixed, and the rest were recorded here. A third review in October
+2026 (`rfcs/0002-code-review-and-twin-readiness.md`) asked a harder
+question: what would it take to make this the vegetation layer of a
+wildfire-risk digital twin for a Colorado utility, as
+`rfcs/0001-wildfire-risk-digital-twin.md` proposes. The limits below
+include what that review found; the roadmap is rewritten around the
+twin.
 
 ## Limits
 
@@ -30,9 +34,33 @@ repository’s issue tracker links each item to its discussion.
   or load), ice, or wind blowout, and the lateral phase position is one
   symmetric offset from the OSM centreline even though the repo records
   a misregistered centreline at Nashville. A measured conductor is
-  treated as a point height per 5 m bin, not a band, and bins rejected
-  by the sanity checks are dropped without being reported. All of this
-  makes the screen optimistic by the sag and blowout envelope.
+  treated as a point height per 5 m bin, not a band; the bins the sanity
+  checks reject are counted and reported (`attr(profile, "bins")`) but
+  not shown on the figures. All of this makes the screen optimistic by
+  the sag and blowout envelope.
+- **Fall-in is tested only at the two conductor bounds.** Reach is
+  smallest when the conductor is level with the tree’s base, so a tree
+  whose base lies between the lower and upper bound can strike at an
+  elevation inside the bracket while striking at neither bound; such a
+  segment reads `robust none` when it is bound-dependent. Canyon spans
+  are where this applies. (October 2026 review, finding A1.)
+- **Grow-in clearance is vertical, inside a fixed band.** A crown just
+  outside the outer phase with its top at conductor height is neither in
+  the grow-in zone nor a strike tree, although it is the classic
+  side-growth and blow-in contact; the standards measure radial
+  clearance. (A2.)
+- **The upper bound trusts every mapped pole and every line vertex as a
+  support.** A distribution tap pole or a bend vertex near mid-span over
+  a gully puts the chord below where the conductor can be, and nothing
+  checks that measured bins fall inside the bracket. (A3.)
+- **Masked area counts as observed.** Cells under the structure mask,
+  including discs around every vertex of every context line, are not
+  scored but are counted as observed, and the masked share is not
+  reported. (A5.)
+- **The Sunshine run exceeded its own conductor envelope.** Conductor
+  returns reach 13.5 m from the OSM centreline while the grow-in zone is
+  6 m; returns over canopy between those distances stayed in the canopy
+  model, as the pipeline’s warning said. (A6.)
 - **Wire labels are trusted.** A wire label requires an observed air gap
   beneath it, so cells holding only wire-labelled returns count as
   observed bare ground. A thin branch layer within the label’s 4 m layer
@@ -60,9 +88,15 @@ repository’s issue tracker links each item to its discussion.
 - **Spatial cross-validation has no buffer** between blocks, and the
   metrics are single-seed point estimates. The 30 m feature
   neighbourhoods and the labelling windows reach across block edges, so
-  the spatial numbers are somewhat optimistic; the large gaps (0.21 vs
-  0.003) are robust, the small ones (0.88 vs 0.83) should not be read
-  without a fold-level spread.
+  the spatial numbers are somewhat optimistic. At Sunshine 76% of the
+  wire points fall in one fold and none in another, so the headline gap
+  (0.20 random vs 0.005 spatial) rests on effectively one held-out block
+  group and should be read as a direction, not a measurement, until
+  per-fold spreads are reported. (A9.)
+- **The weak-label model’s vendor evaluation is in-sample**: the model
+  is scored on the points it trained on, so its row in the Nashville
+  vendor table is not like-for-like with the spatial-CV reference.
+  (A10.)
 - **Vertical units** are assumed to match horizontal units (true for
   both deliveries: metres/metres and US survey feet/US survey feet).
 - **Landsat greenness is not fuel moisture.** Low NDVI over canopy can
@@ -80,47 +114,154 @@ repository’s issue tracker links each item to its discussion.
   carries no failure probability: it says how many trees the winds point
   at the line, not how many will fall.
 
-## Roadmap
+## Roadmap: from a corridor screen to the vegetation layer of a twin
 
-What a next version would change, in the order it should happen. Each
-entry closes a review issue; the issue number is the place to read the
-full argument.
+Rewritten after the October 2026 review. The target is RFC 0001’s twin
+for a Colorado utility; Colorado’s Public Utilities Commission opened
+rulemaking 26R-0355E in September 2026 to require Wildfire Mitigation
+Plans with likelihood-and-consequence assessments tied to equipment and
+an independent check, so an auditable vegetation layer is the first
+thing the twin needs. Each stage below ends in something usable on its
+own. Finding ids (A1, B4, …) refer to RFC 0002.
 
-1.  **Conductor physics (#7, \#24).** Add a sag and blowout allowance
-    from conductor type, span length and a design temperature, use
-    per-vertex lateral phase positions, report the measured conductor as
-    a band rather than a point, and report rejected bins. This is Phase
-    1 of the digital-twin RFC in
-    `rfcs/0001-wildfire-risk-digital-twin.md`.
-2.  **An explicit result object (#9).** Run parameters and provenance
-    travel as R attributes today and are lost by `st_write()` and
-    [`saveRDS()`](https://rdrr.io/r/base/readRDS.html). A `vegrisk_risk`
-    object with `$params` and `$provenance` and a validator, and a
-    composite returned as `list(raster, scenes, dates)`, would fix that
-    once for every downstream step.
-3.  **Run manifest and parameter-keyed caches (#15).** The run id, git
-    SHA and reuse record now land in `summary.rds`; a manifest listing
-    every input (tile checksums, OSM snapshot time, Landsat scene ids,
-    the Open-Meteo model and NWS issuance time) and caches keyed by the
-    parameters that produced them are the rest.
-4.  **Keep identities (#31).** Segments should carry the OSM way id,
-    name, voltage and chainage; strike trees need a stable id so two
-    runs can be compared tree by tree.
-5.  **One breaking-change pass (#21).** Cross-stage parameters
-    (`phase_offset_m`, `growth_m`, `under_line_m`, `half_width_m`) read
-    from the result object instead of being typed again; consistent
-    argument names and order; `quiet=` and `num_threads=`; version 0.2.0
-    with a NEWS entry.
-6.  **Buffered spatial CV with fold-level spread (#19).** Drop training
-    points within the run window plus the feature radius of each test
-    block, and report per-fold ranges or repeated block-CV. This changes
-    the headline CV numbers, so it waits for the result object and the
+### Stage 0: fix what a span’s state means (weeks, all S or M)
+
+1.  **Strike test over the whole bracket** (A1, \#49): per vertex, clamp
+    the tree’s base elevation into \[`z_lo`, `z_hi`\] and report
+    `strike_possible` and `strike_certain`; build `confidence` from
+    those two. Test with a tree base between the bounds.
+2.  **Radial clearance** (A2, \#50): score cells out to
+    `phase_offset_m + clearance_target_m` with the 3D distance from the
+    conductor, and abort when `under_line_m` is narrower than that.
+3.  **A real support set** (A3, \#51): only nodes that are members of
+    the study way, matched on voltage or line membership; log measured
+    bins that fall outside the bracket; `taut_upper()` returns unknown
+    past the outermost chord.
+4.  **Uncertain tops make a cell unobserved** (A4, \#58), the masked
+    share is reported and treated like low coverage (A5, \#59), and the
+    Sunshine envelope is widened and the warning recorded in the summary
+    (A6, \#60).
+5.  **Per-fold CV spread and out-of-fold vendor scoring** (A9, A10,
+    \#63), so the published numbers carry their uncertainty.
+
+### Stage 1: identity, time and provenance (Phase 0/1 of the RFC; weeks)
+
+6.  **Data vintage** (D1, \#52): read GPS time (`opt_select` gains `t`),
+    convert to UTC, record min/median/max flight time per span, and keep
+    the 3DEP project, TNM publication date and per-tile checksums.
+7.  **Stable keys** (D2, B11, \#53): trees keyed on a canonical-CRS
+    position (NAD83(2011) / UTM 13N, EPSG:6342, rounded to 0.5 m) with
+    an epoch-matching table; lines numbered by input order; chainage
+    measured along the OSM way, not the clipped window.
+8.  **Versioned, append-only outputs** (D4, C2, C3, \#54): GeoParquet
+    partitioned by `run_id`, every row with `valid_from`, `valid_to`,
+    `recorded_at`, `superseded_at`, `source`, `method_version`; a `runs`
+    table; “current state” as a view; readers refuse a run with no
     manifest.
-7.  **More public data (#3).** Terrain and aspect, burn-probability
-    surfaces, land-cover fuel classes and historical fire perimeters
-    were proposed as further layers; each would get its own issue when
-    picked up.
-8.  **A weekly live-API smoke test (#17).** The unit tests run offline
-    on synthetic data; the Overpass, TNM, STAC, Open-Meteo and NWS
-    clients would benefit from a scheduled check with
-    `skip_if_offline()`.
+9.  **The run manifest** (C1, C5, C6, C13, \#54): configuration and
+    every resolved parameter, inputs with checksums and snapshot dates
+    (Overpass `[date:]` pinning), the software environment (`renv.lock`,
+    GDAL/GEOS/PROJ versions, thread counts, a dirty-tree check),
+    captured warnings, and a completion status. The field list is in RFC
+    0002 Part 3.
+10. **Content-addressed caches** (B4, C4, C7, \#56): every cache keyed
+    by a hash of its request and upstream inputs, with the recorded
+    arguments compared on load; model reuse gated on a training
+    fingerprint.
+
+### Stage 2: spans, structures and a territory-sized runner (Phase 1; months)
+
+11. **Structure and span tables** (D3, A11, D11, \#53): OSM tower and
+    pole nodes with all their tags and node order, plus the way’s own
+    vertices, deduplicated and snapped, with a LiDAR check for a
+    vertical column of returns; lines split at structures into spans;
+    the 1 m profile and 5 m bins kept as a `span_station` child table;
+    metrics aggregated per span (worst tier wins); implausible span
+    lengths flagged and left without an upper bound. Protective-device
+    sections arrive later as a versioned many-to-one grouping, never as
+    the primary key.
+12. **Chunked, bounded processing** (B1, B2, B3, B10, \#55): work in
+    chainage windows buffered by the 30 m feature radius plus the 12 m
+    wire-run window, rasters masked to the corridor, `feat` carrying
+    `X`, `Y`, `Zref` instead of indexing the point cloud by row,
+    per-window writes to the store, no whole-territory object in memory.
+13. **A library function, not a script** (B5, B7, B9, \#57; tests first,
+    \#68): `vegrisk_run(corridor, inputs, params, store)` with a
+    validated parameter spec, typed outcomes (`ok`, `no_data`,
+    `failed`), no working-directory assumptions, serialisable results
+    ([`terra::wrap()`](https://rspatial.github.io/terra/reference/wrap.html),
+    columns not attributes), and `watchlist.R` reading from the store
+    with a run-id check.
+14. **One regional model** (B6, \#62): trained offline on the labelled
+    set, applied per corridor; cross-validation and ablation move to a
+    scheduled validation job; thread counts become parameters.
+15. **Query by polygon, throttle, time out** (B8, C9, C8, C14, \#64,
+    \#67): all clients through `vegrisk_request()`, per-host pacing,
+    per-chunk polygons, the Open-Meteo product pinned and the commercial
+    terms settled, NWS raw responses kept with the flagged hours.
+16. **Colorado State Plane** (D9, \#69): parse the compound CRS, refuse
+    a missing or mismatched vertical unit, store every output in
+    EPSG:6342 metres, and run a regression test on the same tiles in CO
+    North US survey feet.
+
+### Stage 3: distribution lines (Phase 1; months)
+
+17. **Voltage-class presets** (A7, D7, \#61): `line_class` (T or D) from
+    OSM `power` and voltage selects `wire_min_m`, `layer_m`, the
+    clearance floor, attachment heights and the structure mask radius; a
+    through-canopy conductor detector (linear, along-line, within the
+    expected height band, ignoring the air gap); abstention for any thin
+    elevated layer near a `minor_line`.
+18. **Distribution metrics**: overhang area and canopy-above-conductor
+    fraction; distance-weighted strike counts instead of a binary flag
+    that saturates; honest `bounded` reporting per span. Measure OSM
+    `minor_line` coverage against NAIP before claiming the pilot covers
+    distribution.
+
+### Stage 4: truth (Phase 1; GIS labour)
+
+19. **The hand-labelled set** (#70), by the protocol in RFC 0002 Part 3:
+    whole spans, stratified before results are seen, buffered from
+    training blocks, double-labelled with kappa, with per-bin conductor
+    elevation as derived truth; every published metric cites the
+    label-set version.
+20. **Crown filter and labels** (A8, A15, A16, \#65): pit-filled CHM
+    before the crown-support filter, structure label radius tied to
+    structure type, the small bookkeeping fixes.
+
+### Stage 5: conductor physics (Phase 2)
+
+21. **A conservative sag first** (D8, \#66): parabola per measured span,
+    maximum-temperature sag from the design temperature minus an
+    estimated flight temperature (ERA5 temperature requested at flight
+    time, IEEE 738 with an assumed load), as a lower bound on the
+    conductor; then blowout from a design wind pressure as a lateral
+    band; validated on spans flown on more than one date. FAC-003 MVCD
+    selected by altitude per span.
+22. **The wind arc from the per-vertex hit set** (A12, \#66).
+
+### Stage 6: a vegetation-contact index and consequence (Phase 3)
+
+23. **A monotone, bounded index** (D12, \#71) from encroachment area,
+    strike counts, wind hits and dryness, with `driver` and
+    `model_version` columns, and `P(ignition)` left explicitly `NA`
+    until utility data arrive.
+24. **Pre-registered validation** (#71): consequence against the
+    Marshall (2021) and Fourmile Canyon (2010) loss footprints with a
+    trivial baseline to beat; cross-checks against CO-WRA and Wildfire
+    Risk to Communities; disagreements with Xcel’s filed risk tiers and
+    PSPS footprints reported; field or imagery hit rates for the top
+    grow-in and strike spans; the share of bound-dependent spans stated
+    up front.
+
+### Left as recorded
+
+- **Buffered spatial CV** (#19 items 2 and 3) is folded into stage 0
+  item 5 and stage 4.
+- **The one breaking-change pass** (#21) and the explicit result object
+  (#9) are subsumed by stages 1 and 2: the store schema is the result
+  object.
+- **More public data** (#3): LANDFIRE fuels, Microsoft building
+  footprints, NAIP for species groups, CSFS CO-WRA, MTBS/NIFC perimeters
+  are now named per stage in RFC 0001’s pilot table.
+- **A weekly live-API smoke test** (#17) joins stage 2 item 15.
