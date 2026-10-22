@@ -68,7 +68,12 @@ and <code>2 * seg_m</code> long.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p><code>sf</code> with <code>seg_id</code>, <code>line_id</code>, <code>length_m</code>.</p>
+    <p><code>sf</code> with <code>seg_id</code>, <code>line_id</code> (one per merged line, numbered in
+the order of the first input feature touching each, not union order),
+<code>s_from_m</code> / <code>s_to_m</code> (chainage of the segment's ends along its merged
+line, metres), <code>length_m</code>, and, when <code>lines</code> is an <code>sf</code> carrying them,
+<code>osm_id</code>, <code>name</code>, <code>voltage_kv</code> and <code>operator</code> of the nearest input
+line, so a segment can be traced back to the OSM way it came from.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -24,4 +24,5 @@ nws_forecast(aoi, api = nws_api)
 
 A tibble with the same columns as
 [`wind_history()`](https://mjorden.github.io/powerline-veg-risk/reference/wind_history.md);
-attributes `office`, `grid` and `updated`.
+attributes `office`, `grid`, `updated` (when the NWS grid was issued)
+and `generated`.

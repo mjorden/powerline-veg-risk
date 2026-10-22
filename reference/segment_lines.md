@@ -26,4 +26,9 @@ segment_lines(lines, crs, seg_m = 50)
 
 ## Value
 
-`sf` with `seg_id`, `line_id`, `length_m`.
+`sf` with `seg_id`, `line_id` (one per merged line, numbered in the
+order of the first input feature touching each, not union order),
+`s_from_m` / `s_to_m` (chainage of the segment's ends along its merged
+line, metres), `length_m`, and, when `lines` is an `sf` carrying them,
+`osm_id`, `name`, `voltage_kv` and `operator` of the nearest input line,
+so a segment can be traced back to the OSM way it came from.
