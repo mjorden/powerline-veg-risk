@@ -162,7 +162,12 @@ run_case_study <- function(cfg) {
   vendor_bldg <- if (has_vendor) vc == 6L else NULL
 
   # --- 4. Conductor model -----------------------------------------------------
-  segments <- segment_lines(study, crs, seg_m = 50)
+  segments <- segment_lines(study, crs, seg_m = 50, ways = lines)
+  # Structures and spans along the unclipped way: the stable keys (#53).
+  structures_tbl <- line_structures(lines, structures, crs)
+  spans <- line_spans(lines, structures, crs)
+  step(sprintf("spans: %d between %d confirmed structures on %d way(s); %d implausibly long (missing structure?)",
+               nrow(spans), sum(structures_tbl$confirmed), length(unique(spans$way_id)), sum(spans$implausible)))
   rasters <- corridor_rasters(las, pred, res_m = 1, drop = vendor_bldg)
   # Supports for the upper bound: vertices of the *unclipped* line that a
   # tagged pole or tower confirms (#51); every vertex only when none is
@@ -427,9 +432,16 @@ run_case_study <- function(cfg) {
     plot_wind_exposure(risk, rasters, bound = "lo", file = fig("wind_exposure"))
   }
 
+  # Span roll-up: the 50 m stations summarised per structure-to-structure span.
+  risk$spans <- span_summary(risk$segments, spans, lines)
+  print(st_drop_geometry(risk$spans)[, c("span_id", "length_m", "n_segments", "priority", "priority_lo",
+                                          "confidence", "n_strike_possible", "n_strike_certain")], digits = 3)
   st_write(risk$segments, file.path(out, "segments.gpkg"), delete_dsn = TRUE, quiet = TRUE)
   st_write(risk$trees, file.path(out, "trees.gpkg"), delete_dsn = TRUE, quiet = TRUE)
+  st_write(risk$spans, file.path(out, "spans.gpkg"), delete_dsn = TRUE, quiet = TRUE)
+  st_write(structures_tbl, file.path(out, "structures.gpkg"), delete_dsn = TRUE, quiet = TRUE)
   fwrite(st_drop_geometry(risk$segments), file.path(out, "segments.csv"))
+  fwrite(st_drop_geometry(risk$spans), file.path(out, "spans.csv"))
   fwrite(profile, file.path(out, "conductor_profile.csv"))
   summary <- list(run = list(id = run_id, started = t0, git_sha = git_sha(),
                              model_run_id = fit$run_id, reused_from = reused_from),
@@ -450,6 +462,9 @@ run_case_study <- function(cfg) {
                   n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi),
                                possible = sum(risk$trees$strike_possible), certain = sum(risk$trees$strike_certain)),
                   supports = c(vertices = nrow(all_supports), confirmed = sum(all_supports$confirmed), used = nrow(supports)),
+                  spans = list(n = nrow(spans), n_implausible = sum(spans$implausible),
+                               priority = table(risk$spans$priority), confidence = table(risk$spans$confidence),
+                               canonical_crs = canonical_crs(risk$segments)$epsg),
                   n_conductor_excluded = rasters$n_conductor_excluded,
                   landsat = if (!is.null(dryness)) attr(dryness$segments, "landsat"),
                   landsat_scenes = if (!is.null(dryness)) scene_counts,

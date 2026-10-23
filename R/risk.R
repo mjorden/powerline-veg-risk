@@ -33,10 +33,13 @@
 #'   the order of the first input feature touching each, not union order),
 #'   `s_from_m` / `s_to_m` (chainage of the segment's ends along its merged
 #'   line, metres), `length_m`, and, when `lines` is an `sf` carrying them,
-#'   `osm_id`, `name`, `voltage_kv` and `operator` of the nearest input
-#'   line, so a segment can be traced back to the OSM way it came from.
+#'   `osm_id`, `name`, `voltage_kv` and `operator` of the input line the
+#'   segment's midpoint lies on, so a segment can be traced back to the OSM
+#'   way it came from. With `ways =` (the unclipped OSM ways), each segment
+#'   also gets `s_way_from_m` / `s_way_to_m`: chainage along the way itself,
+#'   which does not move when the study window or the data extent changes.
 #' @export
-segment_lines <- function(lines, crs, seg_m = 50) {
+segment_lines <- function(lines, crs, seg_m = 50, ways = NULL) {
   m <- crs_m_per_unit(crs)
   src <- if (inherits(lines, "sf")) sf::st_transform(lines, crs) else NULL
   parts <- merge_lines(sf::st_transform(sf::st_geometry(lines), crs))
@@ -60,9 +63,18 @@ segment_lines <- function(lines, crs, seg_m = 50) {
   cols <- c("seg_id", "line_id", "s_from_m", "s_to_m", "length_m")
   keep <- if (is.null(src)) character() else intersect(c("osm_id", "name", "voltage_kv", "operator"), names(src))
   if (length(keep)) {
-    nn <- sf::st_nearest_feature(out, src)
+    mid <- sf::st_line_sample(sf::st_cast(sf::st_geometry(out), "LINESTRING"), sample = 0.5)
+    nn <- sf::st_nearest_feature(mid, src)
     for (k in keep) out[[k]] <- sf::st_drop_geometry(src)[[k]][nn]
     cols <- c(cols, keep)
+  }
+  if (!is.null(ways)) {
+    ends <- lapply(sf::st_geometry(out), function(g) { xy <- sf::st_coordinates(g); xy[c(1, nrow(xy)), 1:2] })
+    a <- way_chainage(do.call(rbind, lapply(ends, `[`, 1, )), ways, crs)
+    b <- way_chainage(do.call(rbind, lapply(ends, `[`, 2, )), ways, crs)
+    out$s_way_from_m <- pmin(a$s_way_m, b$s_way_m)
+    out$s_way_to_m <- pmax(a$s_way_m, b$s_way_m)
+    cols <- c(cols, "s_way_from_m", "s_way_to_m")
   }
   out[, c(cols, "geometry")]
 }
@@ -277,8 +289,11 @@ conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
   crs <- sf::st_crs(segments)
   m <- crs_m_per_unit(crs)
   v <- line_vertex_table(segments, crs, step_m)
-  v$seg_id <- segments$seg_id[sf::st_nearest_feature(
-    sf::st_as_sf(v[, c("x", "y")], coords = c("x", "y"), crs = crs), segments)]
+  nearest_seg <- sf::st_nearest_feature(sf::st_as_sf(v[, c("x", "y")], coords = c("x", "y"), crs = crs), segments)
+  v$seg_id <- segments$seg_id[nearest_seg]
+  # line_vertex_table() numbers merged parts in union order; the profile
+  # must use the same line ids as the segments (#53).
+  v$line_id <- segments$line_id[nearest_seg]
   v$ground <- terra::extract(dtm, as.matrix(v[, c("x", "y")]))[, 1]
   v <- v[!is.na(v$ground), ]
 
@@ -474,8 +489,9 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   would otherwise be `"none"`, is tiered `"no data"`: absence of risk
 #'   cannot be claimed where the LiDAR did not see the ground.
 #' @return A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
-#'   treetops: `tree_id` (the treetop's position to 0.1 CRS units, stable
-#'   across runs on the same data), `seg_id`, `height_m`, `dh_m` horizontal
+#'   treetops: `tree_id` (`<epsg>:<x>:<y>`, the treetop's position in
+#'   half-metres of the site's canonical UTM CRS, see [tree_ids()], so the
+#'   same tree has the same id whatever CRS the delivery used), `seg_id`, `height_m`, `dh_m` horizontal
 #'   distance to the nearest conductor, `reach_lo_m` / `reach_hi_m` the height a tree there
 #'   needs to reach the conductor under each bound (the minimum 3D distance
 #'   to any conductor vertex within reach, less the phase offset),
@@ -594,7 +610,7 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     rh <- min_reach(xy, ground, profile$z_hi, profile, m, phase_offset_m, h)
     rp <- min_reach(xy, ground, profile$z_lo, profile, m, phase_offset_m, h, z_hi = profile$z_hi)
     trees <- sf::st_sf(
-      tree_id = sprintf("%.0f_%.0f", xy[, 1] * 10, xy[, 2] * 10),
+      tree_id = tree_ids(xy, crs),
       seg_id = nt$seg_id, height_m = tt$Z, dh_m = nt$dh,
       reach_lo_m = rl$reach, reach_hi_m = rh$reach, reach_min_m = rp$reach,
       dz_lo_m = rl$dz, dz_hi_m = rh$dz,
