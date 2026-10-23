@@ -1,3 +1,9 @@
+# vegrisk (development version)
+
+- Fall-in is tested over the whole conductor bracket, not only at its two bounds: trees carry `reach_min_m`, `strike_possible` and `strike_certain`, and the pessimistic / optimistic tiers use those (#49).
+- Grow-in clearance is radial (horizontal beyond the phase offset, vertical up to the conductor); `assess_risk()` refuses an `under_line_m` narrower than `phase_offset_m + clearance_target_m` and its default is 8 m (#50).
+- `line_supports()` keeps only line vertices that a tagged structure confirms for the upper conductor bound; `conductor_profile()` counts measured bins above the support chord; `taut_upper()` reports an unknown bound past the outermost straddling chord (#51).
+
 # vegrisk 0.1.0
 
 First and closing release of a portfolio project: a segment-by-segment vegetation-risk screen for overhead power lines from public data.

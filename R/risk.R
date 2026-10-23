@@ -262,9 +262,11 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
 #'   `src`. The attribute `bins` is a data frame with one row per line
 #'   counting the chainage bins that held conductor returns (`n_bins`) and
 #'   how many each sanity check rejected (`n_too_few`, `n_below_floor`,
-#'   `n_implausible`), with `n_measured` the bins that survived, so a
-#'   profile that silently lost most of its returns can be told from one
-#'   that never had them.
+#'   `n_implausible`), with `n_measured` the bins that survived and
+#'   `n_above_upper_bound` the measured bins that sit above the support
+#'   chord (kept, but a sign that the support set or `attach_m` is wrong),
+#'   so a profile that silently lost most of its returns can be told from
+#'   one that never had them.
 #' @export
 conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
                               search_m = 15, min_p_wire = 0.9, structure_mask_m = 8,
@@ -309,7 +311,8 @@ conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
     w <- w[d_sup > structure_mask_m]
   }
   bin_log <- data.frame(line_id = unique(v$line_id), n_bins = 0L, n_too_few = 0L,
-                        n_below_floor = 0L, n_implausible = 0L, n_measured = 0L)
+                        n_below_floor = 0L, n_implausible = 0L, n_measured = 0L,
+                        n_above_upper_bound = 0L)
   if (nrow(w) > 0) {
     xy <- as.matrix(w[, c("X", "Y")])
     pr <- line_project(xy, v, m)
@@ -337,6 +340,12 @@ conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
         bin_log$n_implausible[k] <- nrow(above) - nrow(b)
         bin_log$n_measured[k] <- nrow(b)
         if (nrow(b) == 0) next
+        # Measured bins above the support chord mean the chord is not an
+        # upper bound there: a missed or spurious support, or attachments
+        # above `attach_m`. They are kept (measured beats bounded) and
+        # counted so the support set can be checked (#51).
+        chord <- stats::approx(v$s_m[i], v$z_hi[i], xout = b$s_m, rule = 2)$y
+        bin_log$n_above_upper_bound[k] <- sum(is.finite(chord) & b$z > chord + 0.5)
         zz <- interp_with_gaps(b, v$s_m[i], bin_m, max_gap_m)
         ok <- !is.na(zz)
         v$z_lo[i[ok]] <- zz[ok]
@@ -406,7 +415,10 @@ taut_upper <- function(s, z, max_span, step = 5) {
     zb <- matrix(zz[b], length(a), length(b), byrow = TRUE)
     span <- sb - sa
     val <- ifelse(span > 0, za + (zb - za) * (ss[k] - sa) / span, za)
-    max(val[span <= max_span])
+    # Only chords that straddle the station bound it; a zero-length chord at
+    # a line end assumes a support there, which is no bound at all (#51).
+    inside <- span > 0 & span <= max_span & sa < ss[k] & sb > ss[k]
+    if (any(inside)) max(val[inside]) else Inf
   }, numeric(1))
   stats::approx(ss, up, xout = s, rule = 2)$y
 }
@@ -428,10 +440,14 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #' @param under_line_m Horizontal distance from the centreline within which
 #'   canopy counts as "under the conductors". Canopy there is scored as
 #'   grow-in; treetops there are excluded from the fall-in count so the two
-#'   are not double-counted.
+#'   are not double-counted. It must be at least `phase_offset_m +
+#'   clearance_target_m`, so that canopy beside the outer phase inside the
+#'   clearance target is scored (the function aborts otherwise).
 #' @param wire_zone_m Half-width of the wire zone for canopy cover.
-#' @param clearance_target_m Target vertical clearance between canopy and the
-#'   lowest conductor. The default 4.6 m (15 ft) is a common utility
+#' @param clearance_target_m Target radial clearance between canopy and the
+#'   nearest conductor: the 3D distance from the canopy column to the outer
+#'   phase, horizontal beyond `phase_offset_m` and vertical up to the
+#'   conductor. The default 4.6 m (15 ft) is a common utility
 #'   clearance-at-time-of-work target; it is not the NERC FAC-003 minimum
 #'   vegetation clearance distance, which is smaller.
 #' @param cover_min_m Canopy height counted as cover.
@@ -464,16 +480,23 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   needs to reach the conductor under each bound (the minimum 3D distance
 #'   to any conductor vertex within reach, less the phase offset),
 #'   `dz_lo_m` / `dz_hi_m` the conductor's height above the tree's base at
-#'   that vertex, `strike_lo` / `strike_hi` / `strike` whether it does). Columns ending `_lo` / `_hi`
-#'   use the lower / upper conductor bound. `frac_observed` and `frac_observed_under` are the shares of the
+#'   that vertex, `reach_min_m` the smallest reach any conductor elevation
+#'   inside the bracket allows, `strike_lo` / `strike_hi` whether the tree
+#'   reaches the conductor at each bound, `strike_possible` whether it does
+#'   at some plausible elevation, `strike_certain` whether it does at every
+#'   plausible elevation, and `strike = strike_possible`). Columns ending
+#'   `_lo` / `_hi` use the lower / upper conductor bound; segments also
+#'   carry `n_strike_possible` and `n_strike_certain`, which the tiers use. `frac_observed` and `frac_observed_under` are the shares of the
 #'   grid cells within `coverage_m` and `under_line_m` of the segment (not
 #'   past the line's ends) with an observed terrain and canopy value; cells
 #'   off the edge of the data count as unobserved, structure-masked cells as
 #'   observed (known structures, not gaps).
-#'   `priority` is the tier under the optimistic (upper) bound, i.e.
-#'   what holds even if the conductor is as high as plausible; `priority_lo`
-#'   is the pessimistic tier, which saturates wherever canopy stands under a
-#'   bounded span (the lower bound is only ~5 m above ground). Tiers are
+#'   `priority` is the optimistic tier: grow-in under the upper conductor
+#'   bound, fall-in only from trees that strike at every plausible conductor
+#'   elevation; `priority_lo` is the pessimistic tier: grow-in under the
+#'   lower bound, fall-in from trees that strike at some plausible elevation.
+#'   The pessimistic tier saturates wherever canopy stands under a bounded
+#'   span (the lower bound is only ~5 m above ground). Tiers are
 #'   `"grow-in"`, `"fall-in"`, `"no data"` (no risk found, but coverage below
 #'   `min_observed`) and `"none"`. A grow-in or fall-in finding stands even
 #'   at low coverage, though unseen cells could hide a more severe tier.
@@ -483,18 +506,26 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   tier changes with the bound, however much of the conductor was seen:
 #'   the finding sits in the unmeasured part) or `"low coverage"` (`"no
 #'   data"` under both bounds). `frac_measured` is reported alongside.
-#'   `encroach_*_m2` is the canopy area under the conductors inside the
-#'   clearance envelope. Rows are ordered by what holds even under the
+#'   `encroach_*_m2` is the canopy area within `under_line_m` whose radial
+#'   clearance to the outer phase is under `clearance_target_m`;
+#'   `min_clearance_*_m` is the smallest radial clearance there. Rows are ordered by what holds even under the
 #'   optimistic (upper) conductor bound - encroachment, then strike trees -
 #'   then by the same metrics under the lower bound.
 #' @export
 assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 3,
-                        phase_offset_m = 3, growth_m = 0, under_line_m = 6,
+                        phase_offset_m = 3, growth_m = 0, under_line_m = 8,
                         wire_zone_m = 10, clearance_target_m = 4.6, cover_min_m = 2,
                         min_support = 6, structures = NULL, structure_mask_m = 8,
                         min_encroach_m2 = 5, coverage_m = wire_zone_m, min_observed = 0.75) {
   crs <- sf::st_crs(segments)
   m <- crs_m_per_unit(crs)
+  lateral_m <- phase_offset_m + clearance_target_m
+  if (under_line_m < lateral_m) {
+    rlang::abort(sprintf(paste(
+      "`under_line_m` (%g m) is narrower than `phase_offset_m` + `clearance_target_m` (%g m):",
+      "canopy beside the outer phase inside the clearance target would be neither grow-in nor a strike tree.",
+      "Widen `under_line_m` (and the conductor envelope with it)."), under_line_m, lateral_m))
+  }
   dtm <- rasters$dtm
   # NA canopy means "no vegetation point": bare ground, unless the cell is
   # flagged unobserved (void or uncertain exclusion).
@@ -539,9 +570,15 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   scored <- cells$observed %in% TRUE & !is.na(cells$h)
   cells <- cells[scored, ]
   nc <- lapply(nc, `[`, scored)
+  # Radial clearance from the canopy column to the nearest outer phase: the
+  # horizontal gap beyond the phase offset and the vertical gap up to the
+  # conductor (zero where the column reaches conductor height). A crown
+  # beside the outer phase at conductor height is a clearance breach, not a
+  # strike tree that cannot reach (#50).
   top <- cells$ground + cells$h
-  cells$clear_lo <- nc$z_lo - top
-  cells$clear_hi <- nc$z_hi - top
+  hg <- pmax(cells$dh - phase_offset_m, 0)
+  cells$clear_lo <- sqrt(hg^2 + pmax(nc$z_lo - top, 0)^2)
+  cells$clear_hi <- sqrt(hg^2 + pmax(nc$z_hi - top, 0)^2)
 
   # --- treetops: fall-in ----------------------------------------------------
   trees <- empty_trees(crs)
@@ -555,15 +592,24 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     beside <- nt$dh > under_line_m
     rl <- min_reach(xy, ground, profile$z_lo, profile, m, phase_offset_m, h)
     rh <- min_reach(xy, ground, profile$z_hi, profile, m, phase_offset_m, h)
+    rp <- min_reach(xy, ground, profile$z_lo, profile, m, phase_offset_m, h, z_hi = profile$z_hi)
     trees <- sf::st_sf(
       tree_id = sprintf("%.0f_%.0f", xy[, 1] * 10, xy[, 2] * 10),
       seg_id = nt$seg_id, height_m = tt$Z, dh_m = nt$dh,
-      reach_lo_m = rl$reach, reach_hi_m = rh$reach, dz_lo_m = rl$dz, dz_hi_m = rh$dz,
+      reach_lo_m = rl$reach, reach_hi_m = rh$reach, reach_min_m = rp$reach,
+      dz_lo_m = rl$dz, dz_hi_m = rh$dz,
       geometry = sf::st_geometry(tt)
     )
     trees$strike_lo <- beside & h >= trees$reach_lo_m
     trees$strike_hi <- beside & h >= trees$reach_hi_m
-    trees$strike <- trees$strike_lo | trees$strike_hi
+    # Reach is convex in conductor elevation, so over the bracket its minimum
+    # is `reach_min_m` and its maximum sits at one of the two bounds: a tree
+    # strikes at *some* plausible height if h >= the minimum, and at *every*
+    # plausible height if h >= both bounds. Testing only the bounds missed
+    # trees whose base lies between them (#49).
+    trees$strike_possible <- beside & h >= trees$reach_min_m
+    trees$strike_certain <- beside & h >= pmax(trees$reach_lo_m, trees$reach_hi_m)
+    trees$strike <- trees$strike_possible
     trees <- trees[!is.na(ground), ]
   }
 
@@ -594,7 +640,9 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
       encroach_lo_m2     = sum(ul$clear_lo < clearance_target_m) * cell_area,
       encroach_hi_m2     = sum(ul$clear_hi < clearance_target_m) * cell_area,
       n_strike_lo        = sum(ts$strike_lo),
-      n_strike_hi        = sum(ts$strike_hi)
+      n_strike_hi        = sum(ts$strike_hi),
+      n_strike_possible  = sum(ts$strike_possible),
+      n_strike_certain   = sum(ts$strike_certain)
     )
   })
   out <- merge(segments, do.call(rbind, seg_stats), by = "seg_id")
@@ -604,8 +652,12 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     ifelse(t == "none" & unseen, "no data", t)
   }
   lv <- c("grow-in", "fall-in", "no data", "none")
-  p_lo <- tier(out$encroach_lo_m2, out$n_strike_lo)
-  p_hi <- tier(out$encroach_hi_m2, out$n_strike_hi)
+  # Pessimistic: the lowest plausible conductor for grow-in (clearance falls
+  # with the conductor) and any plausible conductor for fall-in; optimistic:
+  # the highest conductor for grow-in and every plausible conductor for
+  # fall-in (#49).
+  p_lo <- tier(out$encroach_lo_m2, out$n_strike_possible)
+  p_hi <- tier(out$encroach_hi_m2, out$n_strike_certain)
   out$priority <- factor(p_hi, levels = lv)
   out$priority_lo <- factor(p_lo, levels = lv)
   # A segment whose tier differs between the bounds is bound-dependent even
@@ -617,16 +669,17 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
                   ifelse(out$frac_measured >= 0.5, "measured", "robust"))),
     levels = c("measured", "robust", "bound-dependent", "low coverage")
   )
-  out <- out[order(-out$encroach_hi_m2, -out$n_strike_hi, -out$encroach_lo_m2,
-                   -out$n_strike_lo), ]
+  out <- out[order(-out$encroach_hi_m2, -out$n_strike_certain, -out$encroach_lo_m2,
+                   -out$n_strike_possible), ]
   list(segments = out, trees = trees)
 }
 
 empty_trees <- function(crs) {
   sf::st_sf(tree_id = character(), seg_id = integer(), height_m = numeric(), dh_m = numeric(),
-            reach_lo_m = numeric(), reach_hi_m = numeric(),
+            reach_lo_m = numeric(), reach_hi_m = numeric(), reach_min_m = numeric(),
             dz_lo_m = numeric(), dz_hi_m = numeric(),
-            strike_lo = logical(), strike_hi = logical(), strike = logical(),
+            strike_lo = logical(), strike_hi = logical(),
+            strike_possible = logical(), strike_certain = logical(), strike = logical(),
             geometry = sf::st_sfc(crs = crs))
 }
 
@@ -634,13 +687,20 @@ empty_trees <- function(crs) {
 # profile vertex the tree could reach (#19). Returns the reach and the
 # conductor's height above the base at the vertex that gives it. An unknown
 # upper bound (z = Inf) is never reachable.
-min_reach <- function(xy, ground, z, profile, m, phase_offset_m, h) {
+# With `z_hi` given, the conductor at each vertex is taken anywhere in
+# [z, z_hi]: reach is convex in conductor elevation and least where the
+# conductor is level with the tree's base, so clamping the base into the
+# bracket gives the smallest reach any plausible conductor allows (#49).
+min_reach <- function(xy, ground, z, profile, m, phase_offset_m, h, z_hi = NULL) {
   step <- stats::median(abs(diff(profile$s_m)), na.rm = TRUE)
   if (!is.finite(step) || step <= 0) step <- 1
   k <- min(nrow(profile), ceiling(2 * (max(h, na.rm = TRUE) + phase_offset_m) / step) + 3L)
   nn <- FNN::get.knnx(as.matrix(profile[, c("x", "y")]), xy, k = k)
   dh <- pmax(nn$nn.dist * m - phase_offset_m, 0)
-  dz <- matrix(z[nn$nn.index], nrow = nrow(xy)) - ground
+  zl <- matrix(z[nn$nn.index], nrow = nrow(xy))
+  g <- matrix(ground, nrow = nrow(xy), ncol = ncol(zl))
+  zc <- if (is.null(z_hi)) zl else pmin(pmax(g, zl), matrix(z_hi[nn$nn.index], nrow = nrow(xy)))
+  dz <- zc - g
   r <- sqrt(dh^2 + dz^2)
   r[is.na(r)] <- Inf
   i <- cbind(seq_len(nrow(xy)), max.col(-r, "first"))
@@ -659,4 +719,44 @@ line_vertex_points <- function(lines) {
   xy <- sf::st_coordinates(sf::st_geometry(lines))
   sf::st_as_sf(as.data.frame(unique(xy[, 1:2, drop = FALSE])), coords = c("X", "Y"),
                crs = sf::st_crs(lines))
+}
+
+#' Support structures of a line, confirmed by tagged OSM nodes
+#'
+#' The upper conductor bound is the chord between a span's own attachments,
+#' so only the line's real supports may define it. A tagged pole or tower of
+#' another circuit, a distribution tap, or a bend vertex a mapper added
+#' mid-span would otherwise pull the chord below where the conductor can be
+#' (#51). A vertex of `lines` is a *confirmed* support when a tagged
+#' structure node lies within `tol_m` of it (OSM ways pass through their
+#' member nodes exactly). When the line has confirmed supports, only those
+#' are returned as `use = TRUE`; when it has none, every vertex is kept with
+#' `use = TRUE` and a warning, which is the old behaviour.
+#'
+#' @param lines `sf` lines, unclipped (clipping adds end points that are not
+#'   structures).
+#' @param structures `sf` points of tagged structures (poles, towers), any
+#'   CRS; may be `NULL`.
+#' @param crs Projected CRS for the output.
+#' @param tol_m Distance within which a structure node confirms a vertex.
+#' @return `sf` POINT layer of the line's vertices with `confirmed` (a
+#'   tagged structure coincides) and `use` (defines the upper bound).
+#' @export
+line_supports <- function(lines, structures = NULL, crs = sf::st_crs(lines), tol_m = 2) {
+  m <- crs_m_per_unit(crs)
+  v <- line_vertex_points(sf::st_transform(sf::st_geometry(lines), crs))
+  v$confirmed <- FALSE
+  if (!is.null(structures) && nrow(structures) > 0) {
+    sxy <- sf::st_coordinates(sf::st_transform(sf::st_geometry(structures), crs))[, 1:2, drop = FALSE]
+    d <- FNN::get.knnx(sxy, sf::st_coordinates(v)[, 1:2, drop = FALSE], k = 1)$nn.dist[, 1] * m
+    v$confirmed <- d <= tol_m
+  }
+  if (any(v$confirmed)) {
+    v$use <- v$confirmed
+  } else {
+    rlang::warn(paste("No tagged structure coincides with a vertex of the line;",
+                      "every vertex is treated as a support for the upper conductor bound."))
+    v$use <- TRUE
+  }
+  v
 }

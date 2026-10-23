@@ -17,7 +17,7 @@
 1. **Whether public LiDAR can decide grow-in depends on whether it sampled the conductors.** In Colorado it barely did (2% of the line), so 27 of 30 segments stay undecidable and 3 are robust candidates. In Nashville the 500 kV bundles were sampled end to end, and the same pipeline gives a measured, decisive screen.
 2. **Vendor vegetation classes contain the conductors.** In Nashville, 99.3% of conductor returns are delivered as *high vegetation*. A canopy model built from the delivered classes flags every one of 39 segments as grow-in; with conductor returns removed, none are.
 3. **Random cross-validation on point clouds misleads.** Random folds report a Colorado wire average precision of 0.20; 100 m spatial blocks report 0.005. The Colorado model does not transfer to Nashville.
-4. **Wind direction splits the strike trees in two.** 97% of Colorado fire-weather hours blow from the west, so the 322 potential strike trees divide into 138 windward of the line and 184 leeward, and the top grow-in candidate also holds the most windward trees.
+4. **Wind direction splits the strike trees in two.** 97% of Colorado fire-weather hours blow from the west, so the 133 potential strike trees divide into 44 windward of the line and 89 leeward, and the top grow-in candidate also holds the most windward trees.
 
 ## Two corridors
 
@@ -27,7 +27,7 @@
 <td width="50%"><img src="man/figures/nashville_conductor_profile.png" alt="West Nashville conductor profile"></td>
 </tr>
 <tr>
-<td valign="top"><b>Sunshine Canyon, Colorado.</b> 115 kV on wood H-frames in the wildland–urban interface, 2.5 km from the 2010 Fourmile Canyon Fire. Conductor bounded, not measured: 3 robust grow-in candidates, 27 undecidable segments, 33–322 strike trees depending on the bound. <a href="https://mjorden.github.io/powerline-veg-risk/articles/sunshine-canyon.html">Case study →</a></td>
+<td valign="top"><b>Sunshine Canyon, Colorado.</b> 115 kV on wood H-frames in the wildland–urban interface, 2.5 km from the 2010 Fourmile Canyon Fire. Conductor bounded, not measured: 3 robust grow-in candidates, 27 undecidable segments, 13–133 strike trees depending on the conductor height. <a href="https://mjorden.github.io/powerline-veg-risk/articles/sunshine-canyon.html">Case study →</a></td>
 <td valign="top"><b>West Nashville, Tennessee.</b> TVA 500 kV on lattice towers, LiDAR in US survey feet with vendor classes to check against. Conductor measured along the whole line: no grow-in, 24 strike trees in 7 segments, 32 segments seen to be clear. <a href="https://mjorden.github.io/powerline-veg-risk/articles/nashville.html">Case study →</a></td>
 </tr>
 </table>

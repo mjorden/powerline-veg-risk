@@ -19,8 +19,8 @@ run_case_study(list(
   half_width_m = 45,
   wire_search_m = 12,
   phase_offset_m = 5.5,                # outer phases, from conductor-return offsets
-  under_line_m = 6,
-  wire_zone_m = 10,
+  under_line_m = 14,                   # >= phase offset + clearance target (#50); covers the 13.5 m conductor spread (#60)
+  wire_zone_m = 15,
   structure_mask_m = 8,                # H-frame width
   min_ground_clear_m = 4.9,            # NESC 232-1, 115 kV, pedestrian-only land
   attach_m = 20,                       # upper limit on wood H-frame attachment height

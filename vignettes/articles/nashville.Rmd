@@ -7,7 +7,7 @@ description: "A 500 kV line whose conductors the LiDAR sampled end to end, with 
 |---|---|
 | Line | TVA Maury–Davidson 500 kV, lattice towers, shared right-of-way (OSM way 19556523, 1.5–3.5 km from the Davidson end) |
 | Setting | Wooded hills, managed right-of-way |
-| LiDAR | `TN_DavidsonCounty_D22`, Tennessee State Plane **US survey feet**, ~34 pts/m², with vendor vegetation (3–5) and building (6) classes |
+| LiDAR | `TN_DavidsonCounty_D22`, flown 20 to 21 March 2022 (from the point GPS times), Tennessee State Plane **US survey feet**, ~34 pts/m², with vendor vegetation (3–5) and building (6) classes |
 | Line length, above-ground points | 2.0 km, 1.05 M |
 | Conductor returns found | 104,181, along ~100% of the line |
 | Result | Decisive: no grow-in, 24 strike trees in 7 segments, 32 clear |

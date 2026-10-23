@@ -15,7 +15,8 @@ read_corridor(files, lines, half_width_m = 40)
 }
 \value{
 A height-normalised \code{LAS} with the original elevation kept in
-column \code{Zref} (lidR convention) and heights in \code{Z}.
+column \code{Zref} (lidR convention), heights in \code{Z}, and the point GPS
+times in \code{gpstime} (see \code{\link[=lidar_vintage]{lidar_vintage()}}).
 }
 \description{
 Clips one or more LAS/LAZ files to a corridor around \code{lines}, drops noise

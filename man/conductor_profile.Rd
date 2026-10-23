@@ -57,9 +57,11 @@ tangent along the line), \code{s_m}, \code{seg_id}, \code{ground}, \code{z_lo}, 
 \code{src}. The attribute \code{bins} is a data frame with one row per line
 counting the chainage bins that held conductor returns (\code{n_bins}) and
 how many each sanity check rejected (\code{n_too_few}, \code{n_below_floor},
-\code{n_implausible}), with \code{n_measured} the bins that survived, so a
-profile that silently lost most of its returns can be told from one
-that never had them.
+\code{n_implausible}), with \code{n_measured} the bins that survived and
+\code{n_above_upper_bound} the measured bins that sit above the support
+chord (kept, but a sign that the support set or \code{attach_m} is wrong),
+so a profile that silently lost most of its returns can be told from
+one that never had them.
 }
 \description{
 Conductor returns are points the wire rule labelled (\code{label == "wire"}) or

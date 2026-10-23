@@ -73,6 +73,7 @@ test_that("midmod risk map draws zero encroachment as absence, not risk (#5)", {
                    geometry = sf::st_sfc(sf::st_linestring(rbind(c(0, 0), c(50, 0))),
                                          sf::st_linestring(rbind(c(50, 0), c(100, 0))), crs = utm))
   trees <- sf::st_sf(strike = FALSE, strike_lo = FALSE, strike_hi = FALSE,
+                     strike_possible = FALSE, strike_certain = FALSE,
                      geometry = sf::st_sfc(sf::st_point(c(10, 10)), crs = utm))
   p <- plot_risk_map(list(chm = chm, dtm = r), list(segments = seg, trees = trees))
   b <- ggplot2::ggplot_build(p)

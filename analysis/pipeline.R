@@ -63,6 +63,12 @@ run_case_study <- function(cfg) {
                               ". A missing tile would leave a hole in the corridor.", call. = FALSE)
     files <- download_tiles(tiles, dirname(files[1]))
   }
+  # Tile identity and vintage: header record plus MD5 of every file (#52).
+  tiles_info <- las_file_info(files)
+  step(sprintf("tiles: %d files, %s points, created %s, %s, GPS time %s",
+               nrow(tiles_info), format(sum(tiles_info$n_points), big.mark = ","),
+               paste(unique(format(tiles_info$created)), collapse = " / "),
+               paste(unique(tiles_info$system), collapse = " / "), unique(tiles_info$gps_time_type)[1]))
   crs <- st_crs(lidR::readLASheader(files[1]))
   m <- crs_m_per_unit(crs)
   extent <- st_as_sfc(st_bbox(lidR::readLAScatalog(files, progress = FALSE)))
@@ -95,6 +101,10 @@ run_case_study <- function(cfg) {
   # --- 2. Corridor point cloud ------------------------------------------------
   las <- read_corridor(files, study, half_width_m = cfg$half_width_m)
   step("corridor points: ", format(lidR::npoints(las), big.mark = ","))
+  vintage <- lidar_vintage(las)
+  step(sprintf("flown %s to %s UTC (median %s; %s)",
+               format(vintage$from, "%Y-%m-%d %H:%M"), format(vintage$to, "%Y-%m-%d %H:%M"),
+               format(vintage$median, "%Y-%m-%d %H:%M"), vintage$gps_time_type))
 
   # --- 3. Features, weak labels, classifier -----------------------------------
   feat <- point_features(las)
@@ -154,13 +164,17 @@ run_case_study <- function(cfg) {
   # --- 4. Conductor model -----------------------------------------------------
   segments <- segment_lines(study, crs, seg_m = 50)
   rasters <- corridor_rasters(las, pred, res_m = 1, drop = vendor_bldg)
-  # Supports: tagged OSM poles/towers plus the vertices of the *unclipped*
-  # line (OSM mappers put a node at each structure; clipping adds end points
-  # that are not structures). Supports outside the data are dropped.
-  supports <- st_sf(geometry = c(st_geometry(st_transform(structures, crs)),
-                                 st_geometry(line_vertex_points(st_transform(lines, crs)))))
-  # Masking also covers the towers of other circuits sharing the corridor.
-  mask_supports <- st_sf(geometry = c(st_geometry(supports),
+  # Supports for the upper bound: vertices of the *unclipped* line that a
+  # tagged pole or tower confirms (#51); every vertex only when none is
+  # tagged. Supports outside the data are dropped downstream.
+  all_supports <- line_supports(lines, structures, crs)
+  supports <- all_supports[all_supports$use, ]
+  step(sprintf("supports: %d line vertices, %d confirmed by tagged structures, %d used for the upper bound",
+               nrow(all_supports), sum(all_supports$confirmed), nrow(supports)))
+  # Masking is the conservative direction: every tagged structure and every
+  # vertex of every circuit sharing the corridor.
+  mask_supports <- st_sf(geometry = c(st_geometry(st_transform(structures, crs)),
+                                      st_geometry(line_vertex_points(st_transform(lines, crs))),
                                       st_geometry(line_vertex_points(st_transform(context, crs)))))
   profile <- conductor_profile(pred, segments, rasters$dtm, supports = supports,
                                search_m = cfg$wire_search_m, structure_mask_m = cfg$structure_mask_m,
@@ -168,8 +182,9 @@ run_case_study <- function(cfg) {
   step(sprintf("conductor measured along %.0f%% of the line; upper bound unknown along %.0f%%",
                100 * mean(profile$src == "measured"), 100 * mean(is.infinite(profile$z_hi))))
   bl <- colSums(attr(profile, "bins")[, -1])
-  step(sprintf("conductor bins: %d with returns; rejected %d (too few points), %d (below code minimum), %d (implausible slope); %d measured",
-               bl[["n_bins"]], bl[["n_too_few"]], bl[["n_below_floor"]], bl[["n_implausible"]], bl[["n_measured"]]))
+  step(sprintf("conductor bins: %d with returns; rejected %d (too few points), %d (below code minimum), %d (implausible slope); %d measured, %d of them above the support chord",
+               bl[["n_bins"]], bl[["n_too_few"]], bl[["n_below_floor"]], bl[["n_implausible"]], bl[["n_measured"]],
+               bl[["n_above_upper_bound"]]))
   # Parameters that assess_risk() and wind_fall_exposure() must agree on
   # come from the config once (#21).
   growth_m <- if (is.null(cfg$growth_m)) 0 else cfg$growth_m
@@ -281,9 +296,17 @@ run_case_study <- function(cfg) {
   ours <- screen(pred, drop = vendor_bldg)
   rasters <- ours$rasters
   risk <- ours$risk
+  # Valid-from for every segment: the flight window of its own returns.
+  if (!is.null(vintage$time)) {
+    fw <- segment_flight_window(vintage$time[feat$pid], profile$seg_id[pr_all$vertex])
+    risk$segments <- merge(risk$segments, fw, by = "seg_id", all.x = TRUE)
+  }
   step(sprintf("excluded %s wire-like conductor-envelope points from the canopy model",
                format(rasters$n_conductor_excluded, big.mark = ",")))
   print(table(optimistic = risk$segments$priority, pessimistic = risk$segments$priority_lo))
+  step(sprintf("strike trees: %d at some plausible conductor height, %d at every plausible height (%d / %d at the lower / upper bound alone)",
+               sum(risk$trees$strike_possible), sum(risk$trees$strike_certain),
+               sum(risk$trees$strike_lo), sum(risk$trees$strike_hi)))
   print(table(risk$segments$confidence))
   step(sprintf("LiDAR coverage: %d uncertain points excluded; segment coverage median %.2f, min %.2f (under line min %.2f); %d 'no data'",
                ours$rasters$n_uncertain_excluded, stats::median(risk$segments$frac_observed),
@@ -410,6 +433,9 @@ run_case_study <- function(cfg) {
   fwrite(profile, file.path(out, "conductor_profile.csv"))
   summary <- list(run = list(id = run_id, started = t0, git_sha = git_sha(),
                              model_run_id = fit$run_id, reused_from = reused_from),
+                  lidar = list(project = cfg$project, tiles = tiles_info,
+                               gps_time_type = vintage$gps_time_type, n_timed = vintage$n,
+                               flight_from = vintage$from, flight_median = vintage$median, flight_to = vintage$to),
                   metrics = metrics, cv_summary = cv_summary,
                   confusion = cv$confusion, fold_counts = cv$fold_counts,
                   importance = model$variable.importance, vendor = vendor,
@@ -421,7 +447,9 @@ run_case_study <- function(cfg) {
                   frac_unbounded = mean(is.infinite(profile$z_hi)),
                   priority = table(risk$segments$priority),
                   priority_by_confidence = table(risk$segments$priority, risk$segments$confidence),
-                  n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi)),
+                  n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi),
+                               possible = sum(risk$trees$strike_possible), certain = sum(risk$trees$strike_certain)),
+                  supports = c(vertices = nrow(all_supports), confirmed = sum(all_supports$confirmed), used = nrow(supports)),
                   n_conductor_excluded = rasters$n_conductor_excluded,
                   landsat = if (!is.null(dryness)) attr(dryness$segments, "landsat"),
                   landsat_scenes = if (!is.null(dryness)) scene_counts,

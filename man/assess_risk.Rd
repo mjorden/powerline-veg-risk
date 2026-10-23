@@ -12,7 +12,7 @@ assess_risk(
   min_tree_m = 3,
   phase_offset_m = 3,
   growth_m = 0,
-  under_line_m = 6,
+  under_line_m = 8,
   wire_zone_m = 10,
   clearance_target_m = 4.6,
   cover_min_m = 2,
@@ -44,12 +44,15 @@ over a trim cycle).}
 \item{under_line_m}{Horizontal distance from the centreline within which
 canopy counts as "under the conductors". Canopy there is scored as
 grow-in; treetops there are excluded from the fall-in count so the two
-are not double-counted.}
+are not double-counted. It must be at least \code{phase_offset_m + clearance_target_m}, so that canopy beside the outer phase inside the
+clearance target is scored (the function aborts otherwise).}
 
 \item{wire_zone_m}{Half-width of the wire zone for canopy cover.}
 
-\item{clearance_target_m}{Target vertical clearance between canopy and the
-lowest conductor. The default 4.6 m (15 ft) is a common utility
+\item{clearance_target_m}{Target radial clearance between canopy and the
+nearest conductor: the 3D distance from the canopy column to the outer
+phase, horizontal beyond \code{phase_offset_m} and vertical up to the
+conductor. The default 4.6 m (15 ft) is a common utility
 clearance-at-time-of-work target; it is not the NERC FAC-003 minimum
 vegetation clearance distance, which is smaller.}
 
@@ -91,16 +94,23 @@ distance to the nearest conductor, \code{reach_lo_m} / \code{reach_hi_m} the hei
 needs to reach the conductor under each bound (the minimum 3D distance
 to any conductor vertex within reach, less the phase offset),
 \code{dz_lo_m} / \code{dz_hi_m} the conductor's height above the tree's base at
-that vertex, \code{strike_lo} / \code{strike_hi} / \code{strike} whether it does). Columns ending \verb{_lo} / \verb{_hi}
-use the lower / upper conductor bound. \code{frac_observed} and \code{frac_observed_under} are the shares of the
+that vertex, \code{reach_min_m} the smallest reach any conductor elevation
+inside the bracket allows, \code{strike_lo} / \code{strike_hi} whether the tree
+reaches the conductor at each bound, \code{strike_possible} whether it does
+at some plausible elevation, \code{strike_certain} whether it does at every
+plausible elevation, and \code{strike = strike_possible}). Columns ending
+\verb{_lo} / \verb{_hi} use the lower / upper conductor bound; segments also
+carry \code{n_strike_possible} and \code{n_strike_certain}, which the tiers use. \code{frac_observed} and \code{frac_observed_under} are the shares of the
 grid cells within \code{coverage_m} and \code{under_line_m} of the segment (not
 past the line's ends) with an observed terrain and canopy value; cells
 off the edge of the data count as unobserved, structure-masked cells as
 observed (known structures, not gaps).
-\code{priority} is the tier under the optimistic (upper) bound, i.e.
-what holds even if the conductor is as high as plausible; \code{priority_lo}
-is the pessimistic tier, which saturates wherever canopy stands under a
-bounded span (the lower bound is only ~5 m above ground). Tiers are
+\code{priority} is the optimistic tier: grow-in under the upper conductor
+bound, fall-in only from trees that strike at every plausible conductor
+elevation; \code{priority_lo} is the pessimistic tier: grow-in under the
+lower bound, fall-in from trees that strike at some plausible elevation.
+The pessimistic tier saturates wherever canopy stands under a bounded
+span (the lower bound is only ~5 m above ground). Tiers are
 \code{"grow-in"}, \code{"fall-in"}, \code{"no data"} (no risk found, but coverage below
 \code{min_observed}) and \code{"none"}. A grow-in or fall-in finding stands even
 at low coverage, though unseen cells could hide a more severe tier.
@@ -109,8 +119,9 @@ segment \emph{and} the same tier under both bounds), \code{"robust"} (same tier
 under both bounds, conductor mostly bounded), \code{"bound-dependent"} (the
 tier changes with the bound, however much of the conductor was seen:
 the finding sits in the unmeasured part) or \code{"low coverage"} (\code{"no data"} under both bounds). \code{frac_measured} is reported alongside.
-\verb{encroach_*_m2} is the canopy area under the conductors inside the
-clearance envelope. Rows are ordered by what holds even under the
+\verb{encroach_*_m2} is the canopy area within \code{under_line_m} whose radial
+clearance to the outer phase is under \code{clearance_target_m};
+\verb{min_clearance_*_m} is the smallest radial clearance there. Rows are ordered by what holds even under the
 optimistic (upper) conductor bound - encroachment, then strike trees -
 then by the same metrics under the lower bound.
 }
