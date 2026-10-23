@@ -1,6 +1,11 @@
 # Shared end-to-end pipeline for the case studies. Each site script builds a
-# config list and calls run_case_study(cfg). Outputs go to output/<id>/,
-# figures to man/figures/<id>_*.png, cached OSM layers to data-raw/<id>/.
+# config list and calls run_case_study(cfg). Every run writes its outputs to
+# output/<id>/runs/<run_id>/ and finishes with manifest.json (the completion
+# marker: code, environment, configuration, inputs, outputs, warnings);
+# output/<id>/latest.txt names the last complete run and output/<id>/runs.csv
+# indexes them all (#54). Caches that outlive a run (model.rds, vendor.rds,
+# the Landsat composite, the wind record) stay in output/<id>/. Figures go
+# to man/figures/<id>_*.png, cached OSM layers to data-raw/<id>/.
 
 devtools::load_all(quiet = TRUE)
 suppressPackageStartupMessages({
@@ -16,28 +21,113 @@ save_rds <- function(x, path) {
   if (!file.rename(tmp, path)) stop("could not replace ", path, call. = FALSE)
   invisible(path)
 }
-git_sha <- function() {
-  tryCatch(system2("git", c("rev-parse", "--short", "HEAD"), stdout = TRUE, stderr = FALSE),
-           error = function(e) NA_character_, warning = function(w) NA_character_)
+
+# The run record. run_case_study() runs the pipeline with every warning
+# captured, then writes the manifest last; a run that errors still gets a
+# manifest with status "failed" and the error, and does not become "latest".
+run_case_study <- function(cfg) {
+  ctx <- new.env(parent = emptyenv())
+  ctx$t0 <- Sys.time()
+  ctx$git <- git_state()
+  ctx$run_id <- paste0(format(ctx$t0, "%Y%m%dT%H%M%SZ", tz = "UTC"), "-", ctx$git$sha,
+                       if (isTRUE(ctx$git$dirty)) "-dirty" else "")
+  ctx$site_dir <- file.path("output", cfg$id)
+  ctx$run_dir <- file.path(ctx$site_dir, "runs", ctx$run_id)
+  dir.create(ctx$run_dir, showWarnings = FALSE, recursive = TRUE)
+  ctx$warnings <- character()
+  ctx$timings <- data.frame(elapsed_s = numeric(), message = character())
+  ctx$inputs <- list()
+  ctx$outputs <- list()
+  result <- NULL
+  status <- "complete"
+  error <- NULL
+  withCallingHandlers(
+    tryCatch(result <- run_case_study_impl(cfg, ctx),
+             error = function(e) { status <<- "failed"; error <<- conditionMessage(e) }),
+    warning = function(w) ctx$warnings <- c(ctx$warnings, conditionMessage(w))
+  )
+  finished <- Sys.time()
+  manifest <- list(
+    schema_version = 1L, run_id = ctx$run_id, site_id = cfg$id, status = status, error = error,
+    started_utc = format(ctx$t0, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    finished_utc = format(finished, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    duration_s = as.numeric(finished - ctx$t0, units = "secs"),
+    mode = if (isTRUE(ctx$reuse)) "reuse" else "full", reused_from = ctx$reused_from,
+    hostname = Sys.info()[["nodename"]],
+    code = c(list(vegrisk_version = as.character(utils::packageVersion("vegrisk"))), ctx$git),
+    environment = run_environment(),
+    params = ctx$params, inputs = ctx$inputs, outputs = ctx$outputs,
+    warnings = ctx$warnings, timings = ctx$timings, counts = ctx$counts
+  )
+  write_manifest(manifest, ctx$run_dir)
+  if (status == "complete") {
+    writeLines(ctx$run_id, file.path(ctx$site_dir, "latest.txt"))
+    index <- data.frame(run_id = ctx$run_id, site_id = cfg$id, started_utc = manifest$started_utc,
+                        finished_utc = manifest$finished_utc, status = status, mode = manifest$mode,
+                        git_sha = ctx$git$sha, git_dirty = isTRUE(ctx$git$dirty),
+                        n_warnings = length(ctx$warnings), stringsAsFactors = FALSE)
+    fwrite(index, file.path(ctx$site_dir, "runs.csv"), append = file.exists(file.path(ctx$site_dir, "runs.csv")))
+    message(sprintf("[%s] run %s complete: %s (%d warnings)", cfg$id, ctx$run_id, ctx$run_dir, length(ctx$warnings)))
+  } else {
+    stop(sprintf("run %s failed: %s (manifest written to %s)", ctx$run_id, error, ctx$run_dir), call. = FALSE)
+  }
+  invisible(result)
 }
 
-run_case_study <- function(cfg) {
-  out <- file.path("output", cfg$id)
+run_case_study_impl <- function(cfg, ctx) {
+  out <- ctx$site_dir     # caches that outlive a run
+  run_dir <- ctx$run_dir  # this run's outputs
   raw <- file.path("data-raw", cfg$id)
-  dir.create(out, showWarnings = FALSE, recursive = TRUE)
   dir.create(raw, showWarnings = FALSE, recursive = TRUE)
   fig <- function(name) file.path("man/figures", paste0(cfg$id, "_", name, ".png"))
-  t0 <- Sys.time()
-  # Every artefact of this run carries the same id; a reused model carries
-  # the id of the run that fitted it.
-  run_id <- paste0(format(t0, "%Y%m%dT%H%M%SZ", tz = "UTC"), "-", git_sha())
-  step <- function(...) message(sprintf("[%s %5.0fs] ", cfg$id, as.numeric(Sys.time() - t0, units = "secs")), ...)
+  t0 <- ctx$t0
+  run_id <- ctx$run_id
+  git_sha <- function() ctx$git$sha
+  step <- function(...) {
+    msg <- paste0(...)
+    ctx$timings <- rbind(ctx$timings, data.frame(elapsed_s = round(as.numeric(Sys.time() - t0, units = "secs"), 1),
+                                                 message = msg))
+    message(sprintf("[%s %5.0fs] ", cfg$id, as.numeric(Sys.time() - t0, units = "secs")), msg)
+  }
+  # Every tabular output carries the run id and the transaction time; rows
+  # with a flight window also carry valid_from (the survey) (#54).
+  stamp <- function(x) {
+    x$run_id <- run_id
+    x$recorded_at <- format(t0, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+    if ("flight_from" %in% names(x)) x$valid_from <- x$flight_from
+    x
+  }
+  record_output <- function(path, table = NULL) {
+    ctx$outputs[[basename(path)]] <- file_record(path, table)
+    invisible(path)
+  }
+  # Every parameter the run relies on, explicit or default, so a changed
+  # default is visible in the manifest rather than silent (#54).
+  ctx$params <- list(
+    cfg = cfg, seg_m = 50, res_m = 1, block_m = 100, n_folds = 5,
+    growth_m = if (is.null(cfg$growth_m)) 0 else cfg$growth_m,
+    point_features = defaults_of(point_features, c("k", "min_height_m")),
+    weak_labels = defaults_of(weak_labels),
+    train_point_classifier = defaults_of(train_point_classifier),
+    cv_point_classifier = defaults_of(cv_point_classifier),
+    corridor_rasters = defaults_of(corridor_rasters),
+    conductor_profile = defaults_of(conductor_profile),
+    assess_risk = defaults_of(assess_risk),
+    canopy_dryness = defaults_of(canopy_dryness),
+    fire_wind_hours = defaults_of(fire_wind_hours),
+    wind_fall_exposure = defaults_of(wind_fall_exposure)
+  )
   # OSM layers are cached as GeoJSON with a sidecar recording the OSM
   # snapshot time and the query. An empty answer is not cached: Overpass
   # aborts are refused upstream (#8), but a genuinely empty area is still
   # re-queried next run rather than frozen.
   cache <- function(path, expr) {
-    if (file.exists(path)) return(st_read(path, quiet = TRUE))
+    meta_path <- paste0(path, ".meta.json")
+    if (file.exists(path)) {
+      ctx$inputs$osm[[basename(path)]] <- c(file_record(path),
+        if (file.exists(meta_path)) jsonlite::read_json(meta_path) else list(sidecar = "missing"))
+      return(st_read(path, quiet = TRUE))
+    }
     x <- expr
     if (nrow(x) == 0) {
       warning(sprintf("%s: OSM returned nothing; not cached, will be re-queried next run.", basename(path)),
@@ -48,7 +138,8 @@ run_case_study <- function(cfg) {
     jsonlite::write_json(list(osm_timestamp = attr(x, "osm_timestamp"), query = attr(x, "osm_query"),
                               fetched_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
                               n = nrow(x)),
-                         paste0(path, ".meta.json"), auto_unbox = TRUE, pretty = TRUE)
+                         meta_path, auto_unbox = TRUE, pretty = TRUE)
+    ctx$inputs$osm[[basename(path)]] <- c(file_record(path), jsonlite::read_json(meta_path))
     x
   }
 
@@ -62,9 +153,11 @@ run_case_study <- function(cfg) {
     if (length(missing)) stop("Tiles not found on The National Map: ", paste(missing, collapse = ", "),
                               ". A missing tile would leave a hole in the corridor.", call. = FALSE)
     files <- download_tiles(tiles, dirname(files[1]))
+    ctx$inputs$tnm <- st_drop_geometry(tiles)[, intersect(c("title", "url", "pub_date", "size_bytes"), names(tiles))]
   }
   # Tile identity and vintage: header record plus MD5 of every file (#52).
   tiles_info <- las_file_info(files)
+  ctx$inputs$lidar <- list(project = cfg$project, tiles = tiles_info)
   step(sprintf("tiles: %d files, %s points, created %s, %s, GPS time %s",
                nrow(tiles_info), format(sum(tiles_info$n_points), big.mark = ","),
                paste(unique(format(tiles_info$created)), collapse = " / "),
@@ -122,6 +215,7 @@ run_case_study <- function(cfg) {
   # an old run's metrics; summary.rds records which run it came from (#30).
   fit_path <- file.path(out, "model.rds")
   reuse <- Sys.getenv("VEGRISK_REUSE") == "1" && file.exists(fit_path)
+  ctx$reuse <- reuse
   if (reuse) {
     fit <- readRDS(fit_path)
     if (is.null(fit$cv)) stop(fit_path, " predates the run record (#30); run once without VEGRISK_REUSE.",
@@ -132,6 +226,7 @@ run_case_study <- function(cfg) {
     cv_summary <- cv$summary
     reused_from <- list(run_id = fit$run_id, fitted_at = fit$fitted_at,
                         model_md5 = unname(tools::md5sum(fit_path)))
+    ctx$reused_from <- reused_from
     step("reusing model and cross-validation from run ", fit$run_id)
   } else {
     cv <- cv_point_classifier(feat)
@@ -152,8 +247,11 @@ run_case_study <- function(cfg) {
   }
   print(metrics, digits = 3)
   print(cv_summary, digits = 3)
-  fwrite(metrics, file.path(out, "cv_metrics.csv"))
-  fwrite(cv_summary, file.path(out, "cv_summary.csv"))
+  ctx$inputs$model <- c(file_record(fit_path), list(fitted_run_id = fit$run_id))
+  fwrite(stamp(metrics), file.path(run_dir, "cv_metrics.csv"), eol = "\n")
+  record_output(file.path(run_dir, "cv_metrics.csv"), metrics)
+  fwrite(stamp(cv_summary), file.path(run_dir, "cv_summary.csv"), eol = "\n")
+  record_output(file.path(run_dir, "cv_summary.csv"), cv_summary)
   pred <- predict_points(model, feat)
   print(table(predicted = pred$pred, weak_label = pred$label, useNA = "ifany"))
 
@@ -162,7 +260,12 @@ run_case_study <- function(cfg) {
   vendor_bldg <- if (has_vendor) vc == 6L else NULL
 
   # --- 4. Conductor model -----------------------------------------------------
-  segments <- segment_lines(study, crs, seg_m = 50)
+  segments <- segment_lines(study, crs, seg_m = 50, ways = lines)
+  # Structures and spans along the unclipped way: the stable keys (#53).
+  structures_tbl <- line_structures(lines, structures, crs)
+  spans <- line_spans(lines, structures, crs)
+  step(sprintf("spans: %d between %d confirmed structures on %d way(s); %d implausibly long (missing structure?)",
+               nrow(spans), sum(structures_tbl$confirmed), length(unique(spans$way_id)), sum(spans$implausible)))
   rasters <- corridor_rasters(las, pred, res_m = 1, drop = vendor_bldg)
   # Supports for the upper bound: vertices of the *unclipped* line that a
   # tagged pole or tower confirms (#51); every vertex only when none is
@@ -244,6 +347,7 @@ run_case_study <- function(cfg) {
     if (!is.null(cfg$transfer_from)) {
       path <- file.path("output", cfg$transfer_from, "model.rds")
       other_fit <- readRDS(path)
+      ctx$inputs$transfer_model <- c(file_record(path), list(fitted_run_id = other_fit$run_id))
       if (is.null(other_fit$model)) stop(path, " predates the run record (#30); re-run ",
                                          cfg$transfer_from, " first.", call. = FALSE)
       other <- other_fit$model
@@ -372,6 +476,10 @@ run_case_study <- function(cfg) {
     scene_counts <- c(found = nrow(scene_log), used = sum(scene_log$used),
                       no_coverage = sum(scene_log$skip_reason %in% "no coverage"),
                       error = sum(!scene_log$used & !scene_log$skip_reason %in% "no coverage"))
+    ctx$inputs$landsat <- list(config = lc, scene_counts = as.list(scene_counts),
+                               composite = if (file.exists(comp_path)) file_record(comp_path),
+                               scenes = if (file.exists(scenes_path)) file_record(scenes_path, scene_log),
+                               scene_ids = scene_log$id[scene_log$used])
     dryness <- canopy_dryness(comp, rasters, profile, risk, zone_m = cfg$under_line_m,
                               corridor_m = cfg$half_width_m,
                               structures = mask_supports, structure_mask_m = cfg$structure_mask_m,
@@ -408,6 +516,9 @@ run_case_study <- function(cfg) {
       fwrite(wind, wind_path)
       saveRDS(c(attr(wind, "lon"), attr(wind, "lat")), file.path(out, "wind_cell.rds"))
     }
+    ctx$inputs$wind <- list(config = wc, record = file_record(wind_path),
+                            cell_lon = attr(wind, "lon"), cell_lat = attr(wind, "lat"),
+                            n_hours = nrow(wind), from = format(min(wind$time)), to = format(max(wind$time)))
     fw <- fire_wind_hours(wind, gust_quantile = if (is.null(wc$gust_quantile)) 0.95 else wc$gust_quantile,
                           max_rh = if (is.null(wc$max_rh)) 30 else wc$max_rh)
     attr(fw, "lon") <- attr(wind, "lon")
@@ -427,10 +538,40 @@ run_case_study <- function(cfg) {
     plot_wind_exposure(risk, rasters, bound = "lo", file = fig("wind_exposure"))
   }
 
-  st_write(risk$segments, file.path(out, "segments.gpkg"), delete_dsn = TRUE, quiet = TRUE)
-  st_write(risk$trees, file.path(out, "trees.gpkg"), delete_dsn = TRUE, quiet = TRUE)
-  fwrite(st_drop_geometry(risk$segments), file.path(out, "segments.csv"))
-  fwrite(profile, file.path(out, "conductor_profile.csv"))
+  # Span roll-up: the 50 m stations summarised per structure-to-structure span.
+  risk$spans <- span_summary(risk$segments, spans, lines)
+  # Trees take their valid-from from their segment's flight window.
+  if ("flight_from" %in% names(risk$segments)) {
+    risk$trees$flight_from <- risk$segments$flight_from[match(risk$trees$seg_id, risk$segments$seg_id)]
+  }
+  ss <- attr(risk$spans, "segment_span")
+  risk$segments$span_id <- ss$span_id[match(risk$segments$seg_id, ss$seg_id)]
+  step(sprintf("span roll-up: %d stations in %d spans; %d stations outside any span (no confirmed structure on both sides)",
+               sum(!is.na(risk$segments$span_id)), sum(risk$spans$n_segments > 0), sum(is.na(risk$segments$span_id))))
+  print(st_drop_geometry(risk$spans)[, c("span_id", "length_m", "n_segments", "priority", "priority_lo",
+                                          "confidence", "n_strike_possible", "n_strike_certain")], digits = 3)
+  risk$segments <- stamp(risk$segments)
+  risk$trees <- stamp(risk$trees)
+  risk$spans <- stamp(risk$spans)
+  structures_tbl <- stamp(structures_tbl)
+  profile <- stamp(profile)
+  write_layer <- function(x, name) {
+    p <- file.path(run_dir, name)
+    st_write(x, p, quiet = TRUE)
+    record_output(p, x)
+  }
+  write_table <- function(x, name) {
+    p <- file.path(run_dir, name)
+    fwrite(x, p, eol = "\n")
+    record_output(p, x)
+  }
+  write_layer(risk$segments, "segments.gpkg")
+  write_layer(risk$trees, "trees.gpkg")
+  write_layer(risk$spans, "spans.gpkg")
+  write_layer(structures_tbl, "structures.gpkg")
+  write_table(st_drop_geometry(risk$segments), "segments.csv")
+  write_table(st_drop_geometry(risk$spans), "spans.csv")
+  write_table(profile, "conductor_profile.csv")
   summary <- list(run = list(id = run_id, started = t0, git_sha = git_sha(),
                              model_run_id = fit$run_id, reused_from = reused_from),
                   lidar = list(project = cfg$project, tiles = tiles_info,
@@ -450,6 +591,10 @@ run_case_study <- function(cfg) {
                   n_strike = c(lo = sum(risk$trees$strike_lo), hi = sum(risk$trees$strike_hi),
                                possible = sum(risk$trees$strike_possible), certain = sum(risk$trees$strike_certain)),
                   supports = c(vertices = nrow(all_supports), confirmed = sum(all_supports$confirmed), used = nrow(supports)),
+                  spans = list(n = nrow(spans), n_implausible = sum(spans$implausible),
+                               n_segments_unassigned = sum(is.na(risk$segments$span_id)),
+                               priority = table(risk$spans$priority), confidence = table(risk$spans$confidence),
+                               canonical_crs = canonical_crs(risk$segments)$epsg),
                   n_conductor_excluded = rasters$n_conductor_excluded,
                   landsat = if (!is.null(dryness)) attr(dryness$segments, "landsat"),
                   landsat_scenes = if (!is.null(dryness)) scene_counts,
@@ -462,7 +607,12 @@ run_case_study <- function(cfg) {
                     c(hi = sum(dryness$segments$dry_grow_in, na.rm = TRUE),
                       lo = sum(dryness$segments$dry_grow_in_lo, na.rm = TRUE))
                   })
-  save_rds(summary, file.path(out, "summary.rds"))
+  save_rds(summary, file.path(run_dir, "summary.rds"))
+  record_output(file.path(run_dir, "summary.rds"))
+  ctx$counts <- list(segments = nrow(risk$segments), trees = nrow(risk$trees), spans = nrow(risk$spans),
+                     strike_possible = sum(risk$trees$strike_possible), strike_certain = sum(risk$trees$strike_certain),
+                     priority = as.list(table(risk$segments$priority)),
+                     confidence = as.list(table(risk$segments$confidence)))
 
   # --- 7. Figures -------------------------------------------------------------
   plot_risk_map(rasters, risk, supports, title = cfg$title, source = cfg$source,
@@ -473,6 +623,9 @@ run_case_study <- function(cfg) {
                      half_len_m = cfg$half_width_m - 5)
   plot_cv(metrics, fig("cv_metrics"))
   plot_importance(model, fig("importance"))
+  for (nm in c("risk_map", "conductor_profile", "cross_section", "cv_metrics", "importance", "canopy_dryness", "wind_exposure")) {
+    if (file.exists(fig(nm))) ctx$outputs$figures[[nm]] <- file_record(fig(nm))
+  }
   step("done")
   invisible(list(feat = feat, pred = pred, las = las, model = model, risk = risk,
                  profile = profile, summary = summary))
