@@ -63,6 +63,12 @@ run_case_study <- function(cfg) {
                               ". A missing tile would leave a hole in the corridor.", call. = FALSE)
     files <- download_tiles(tiles, dirname(files[1]))
   }
+  # Tile identity and vintage: header record plus MD5 of every file (#52).
+  tiles_info <- las_file_info(files)
+  step(sprintf("tiles: %d files, %s points, created %s, %s, GPS time %s",
+               nrow(tiles_info), format(sum(tiles_info$n_points), big.mark = ","),
+               paste(unique(format(tiles_info$created)), collapse = " / "),
+               paste(unique(tiles_info$system), collapse = " / "), unique(tiles_info$gps_time_type)[1]))
   crs <- st_crs(lidR::readLASheader(files[1]))
   m <- crs_m_per_unit(crs)
   extent <- st_as_sfc(st_bbox(lidR::readLAScatalog(files, progress = FALSE)))
@@ -95,6 +101,10 @@ run_case_study <- function(cfg) {
   # --- 2. Corridor point cloud ------------------------------------------------
   las <- read_corridor(files, study, half_width_m = cfg$half_width_m)
   step("corridor points: ", format(lidR::npoints(las), big.mark = ","))
+  vintage <- lidar_vintage(las)
+  step(sprintf("flown %s to %s UTC (median %s; %s)",
+               format(vintage$from, "%Y-%m-%d %H:%M"), format(vintage$to, "%Y-%m-%d %H:%M"),
+               format(vintage$median, "%Y-%m-%d %H:%M"), vintage$gps_time_type))
 
   # --- 3. Features, weak labels, classifier -----------------------------------
   feat <- point_features(las)
@@ -286,6 +296,11 @@ run_case_study <- function(cfg) {
   ours <- screen(pred, drop = vendor_bldg)
   rasters <- ours$rasters
   risk <- ours$risk
+  # Valid-from for every segment: the flight window of its own returns.
+  if (!is.null(vintage$time)) {
+    fw <- segment_flight_window(vintage$time[feat$pid], profile$seg_id[pr_all$vertex])
+    risk$segments <- merge(risk$segments, fw, by = "seg_id", all.x = TRUE)
+  }
   step(sprintf("excluded %s wire-like conductor-envelope points from the canopy model",
                format(rasters$n_conductor_excluded, big.mark = ",")))
   print(table(optimistic = risk$segments$priority, pessimistic = risk$segments$priority_lo))
@@ -418,6 +433,9 @@ run_case_study <- function(cfg) {
   fwrite(profile, file.path(out, "conductor_profile.csv"))
   summary <- list(run = list(id = run_id, started = t0, git_sha = git_sha(),
                              model_run_id = fit$run_id, reused_from = reused_from),
+                  lidar = list(project = cfg$project, tiles = tiles_info,
+                               gps_time_type = vintage$gps_time_type, n_timed = vintage$n,
+                               flight_from = vintage$from, flight_median = vintage$median, flight_to = vintage$to),
                   metrics = metrics, cv_summary = cv_summary,
                   confusion = cv$confusion, fold_counts = cv$fold_counts,
                   importance = model$variable.importance, vendor = vendor,
