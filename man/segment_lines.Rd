@@ -4,7 +4,7 @@
 \alias{segment_lines}
 \title{Split power lines into equal-length segments}
 \usage{
-segment_lines(lines, crs, seg_m = 50)
+segment_lines(lines, crs, seg_m = 50, ways = NULL)
 }
 \arguments{
 \item{lines}{\code{sf} lines (any CRS).}
@@ -14,14 +14,20 @@ segment_lines(lines, crs, seg_m = 50)
 \item{seg_m}{Target segment length in metres. Each line is split into
 \code{floor(length / seg_m)} equal segments, so segments are between \code{seg_m}
 and \code{2 * seg_m} long.}
+
+\item{ways}{Optional \code{sf} of the unclipped OSM ways the lines were cut
+from; when given, each segment also gets its chainage along the way.}
 }
 \value{
 \code{sf} with \code{seg_id}, \code{line_id} (one per merged line, numbered in
 the order of the first input feature touching each, not union order),
 \code{s_from_m} / \code{s_to_m} (chainage of the segment's ends along its merged
 line, metres), \code{length_m}, and, when \code{lines} is an \code{sf} carrying them,
-\code{osm_id}, \code{name}, \code{voltage_kv} and \code{operator} of the nearest input
-line, so a segment can be traced back to the OSM way it came from.
+\code{osm_id}, \code{name}, \code{voltage_kv} and \code{operator} of the input line the
+segment's midpoint lies on, so a segment can be traced back to the OSM
+way it came from. With \verb{ways =} (the unclipped OSM ways), each segment
+also gets \code{s_way_from_m} / \code{s_way_to_m}: chainage along the way itself,
+which does not move when the study window or the data extent changes.
 }
 \description{
 Split power lines into equal-length segments
