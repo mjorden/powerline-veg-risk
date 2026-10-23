@@ -434,6 +434,10 @@ run_case_study <- function(cfg) {
 
   # Span roll-up: the 50 m stations summarised per structure-to-structure span.
   risk$spans <- span_summary(risk$segments, spans, lines)
+  ss <- attr(risk$spans, "segment_span")
+  risk$segments$span_id <- ss$span_id[match(risk$segments$seg_id, ss$seg_id)]
+  step(sprintf("span roll-up: %d stations in %d spans; %d stations outside any span (no confirmed structure on both sides)",
+               sum(!is.na(risk$segments$span_id)), sum(risk$spans$n_segments > 0), sum(is.na(risk$segments$span_id))))
   print(st_drop_geometry(risk$spans)[, c("span_id", "length_m", "n_segments", "priority", "priority_lo",
                                           "confidence", "n_strike_possible", "n_strike_certain")], digits = 3)
   st_write(risk$segments, file.path(out, "segments.gpkg"), delete_dsn = TRUE, quiet = TRUE)
@@ -463,6 +467,7 @@ run_case_study <- function(cfg) {
                                possible = sum(risk$trees$strike_possible), certain = sum(risk$trees$strike_certain)),
                   supports = c(vertices = nrow(all_supports), confirmed = sum(all_supports$confirmed), used = nrow(supports)),
                   spans = list(n = nrow(spans), n_implausible = sum(spans$implausible),
+                               n_segments_unassigned = sum(is.na(risk$segments$span_id)),
                                priority = table(risk$spans$priority), confidence = table(risk$spans$confidence),
                                canonical_crs = canonical_crs(risk$segments)$epsg),
                   n_conductor_excluded = rasters$n_conductor_excluded,
