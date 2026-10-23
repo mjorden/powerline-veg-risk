@@ -7,7 +7,7 @@ description: "A 115 kV line in the wildland-urban interface, where the LiDAR bar
 |---|---|
 | Line | Sunshine–Boulder Hydro 115 kV, wood H-frames (OSM way 1381464850) |
 | Setting | Wildland–urban interface west of Boulder; the 2010 Fourmile Canyon Fire burned about 2.5 km away |
-| LiDAR | `CO_DRCOG_2020`, UTM metres, ~35 pts/m², ground / unclassified / noise only |
+| LiDAR | `CO_DRCOG_2020`, flown 29 May 2020 (14:25 to 14:50 UTC, from the point GPS times), UTM metres, ~35 pts/m², ground / unclassified / noise only |
 | Line length, above-ground points | 1.52 km, 2.26 M |
 | Conductor returns found | 914, along 2% of the line |
 | Result | Bounded: 3 robust grow-in candidates, 27 segments undecidable |
