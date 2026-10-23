@@ -2,25 +2,31 @@
 #
 #   Rscript analysis/watchlist.R sunshine
 #
-# Needs output/<site>/ from a run whose config set `wind` (and optionally
-# `landsat`). Pulls the live NWS hourly forecast and active alerts for the
-# corridor and applies the climatological fire-weather thresholds; nothing
-# is reprocessed. Writes output/<site>/watchlist.csv (the latest list, with
-# the settings it was made with in every row) and a timestamped copy
-# watchlist_<UTC time>.csv, so earlier lists are kept. A list with nothing
+# Needs a complete run of the site (output/<site>/latest.txt, or a run id as
+# the second argument) whose config set `wind` (and optionally `landsat`).
+# The run is opened with read_run(), which refuses a run without a manifest
+# and checks that the tables carry the run's id (#54). Pulls the live NWS
+# hourly forecast and active alerts for the corridor and applies the
+# climatological fire-weather thresholds; nothing is reprocessed. Writes
+# output/<site>/watchlist.csv (the latest list, with the settings it was
+# made with and the parent run id in every row) and a timestamped copy under
+# output/<site>/watchlists/, so earlier lists are kept. A list with nothing
 # flagged is one row saying so, not an empty file.
 
 devtools::load_all(quiet = TRUE)
 suppressPackageStartupMessages(library(sf))
 
-site <- commandArgs(trailingOnly = TRUE)[1]
+args <- commandArgs(trailingOnly = TRUE)
+site <- args[1]
 if (is.na(site)) site <- "sunshine"
 out <- file.path("output", site)
-summary <- readRDS(file.path(out, "summary.rds"))
+run <- read_run(out, run_id = if (length(args) >= 2) args[2] else NULL)
+message(sprintf("run %s (%s, %s)", run$run_id, run$manifest$mode, run$manifest$finished_utc))
+summary <- readRDS(file.path(run$run_dir, "summary.rds"))
 if (is.null(summary$wind)) stop("Run the case study with a `wind` config first.")
 
-segments <- st_read(file.path(out, "segments.gpkg"), quiet = TRUE)
-trees <- st_read(file.path(out, "trees.gpkg"), quiet = TRUE)
+segments <- st_read(file.path(run$run_dir, "segments.gpkg"), quiet = TRUE)
+trees <- st_read(file.path(run$run_dir, "trees.gpkg"), quiet = TRUE)
 attr(segments, "wind") <- summary$wind
 risk <- list(segments = segments, trees = trees)
 
@@ -50,6 +56,7 @@ if (nrow(hours) == 0) {
 # What this list was made with, in every row, so the CSV stands on its own.
 meta <- data.frame(
   generated_at = format(now, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  parent_run_id = run$run_id, vegrisk_version = as.character(packageVersion("vegrisk")),
   nws_office = attr(fc, "office"), nws_grid = attr(fc, "grid"),
   nws_updated = if (is.null(attr(fc, "updated"))) NA_character_ else attr(fc, "updated"),
   forecast_from = format(min(fc$time), "%Y-%m-%dT%H:%MZ", tz = "UTC"),
@@ -66,5 +73,7 @@ rows <- if (nrow(wl) > 0) as.data.frame(wl) else {
 }
 rows$note <- if (nrow(wl) > 0) "" else "no segments flagged"
 out_rows <- cbind(rows, meta[rep(1, nrow(rows)), , drop = FALSE])
-data.table::fwrite(out_rows, file.path(out, "watchlist.csv"))
-data.table::fwrite(out_rows, file.path(out, sprintf("watchlist_%s.csv", format(now, "%Y%m%dT%H%MZ", tz = "UTC"))))
+dir.create(file.path(out, "watchlists"), showWarnings = FALSE)
+data.table::fwrite(out_rows, file.path(out, "watchlist.csv"), eol = "\n")
+data.table::fwrite(out_rows, file.path(out, "watchlists", sprintf("%s_%s.csv", format(now, "%Y%m%dT%H%MZ", tz = "UTC"), run$run_id)),
+                   eol = "\n")
