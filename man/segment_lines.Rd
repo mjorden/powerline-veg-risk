@@ -14,6 +14,9 @@ segment_lines(lines, crs, seg_m = 50, ways = NULL)
 \item{seg_m}{Target segment length in metres. Each line is split into
 \code{floor(length / seg_m)} equal segments, so segments are between \code{seg_m}
 and \code{2 * seg_m} long.}
+
+\item{ways}{Optional \code{sf} of the unclipped OSM ways the lines were cut
+from; when given, each segment also gets its chainage along the way.}
 }
 \value{
 \code{sf} with \code{seg_id}, \code{line_id} (one per merged line, numbered in
