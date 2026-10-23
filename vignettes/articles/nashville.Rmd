@@ -22,6 +22,22 @@ The 500 kV bundles were well sampled: 104,181 conductor returns, three phases at
 
 ![Nashville cross-section](../reference/figures/nashville_cross_section.png)
 
+## By span
+
+The OSM way has 131 vertices, 8 of them coincident with tagged towers, so the 2 km study window rolls up to 7 spans of 152 to 424 m, all measured:
+
+| span | length | stations | tier | strike trees |
+|---|---:|---:|---|---:|
+| S1229702375 > S1229702785 | 249 m | 5 | fall-in | 2 |
+| S1229702785 > S1229702256 | 277 m | 5 | none | 0 |
+| S1229702256 > S1229702278 | 200 m | 4 | fall-in | 1 |
+| S1229702278 > S1229703022 | 424 m | 8 | fall-in | 19 |
+| S1229703022 > S1229702334 | 302 m | 6 | none | 0 |
+| S1229702334 > S1229702692 | 152 m | 3 | fall-in | 1 |
+| S1229702692 > S1230197138 | 175 m | 3 | none | 0 |
+
+Five of the 39 stations and one of the 24 strike trees fall outside the tagged towers' reach and belong to no span. The other 123 vertices of the way are bends and crossings a mapper added; they no longer act as supports for the upper bound, which here is moot because the conductor is measured end to end.
+
 ## Wires transfer across space here; the Colorado model does not
 
 **Classifier against weak labels (spatial blocks):**

@@ -31,6 +31,19 @@ Clearance is radial: the 3D distance from the canopy column to the outer phase, 
 - **27 segments are bound-dependent.** Whether they need work depends on where the conductor actually is, which this acquisition doesn't show.
 - **The LiDAR saw the corridor.** Every segment has at least 94% of its corridor and 88% of its grow-in zone observed (median 100%), so none is tiered `no data`.
 
+## By span
+
+The OSM way is 3.2 km long and carries 14 vertices, 5 of them tagged H-frames; the study window is the 1.52 km the LiDAR covers. Rolled up to structure-to-structure spans:
+
+| span | length | stations | optimistic tier | pessimistic tier | strike trees, some / every plausible height |
+|---|---:|---:|---|---|---:|
+| S12789370510 > S3704238536 | 63 m | 1 | none | grow-in | 2 / 0 |
+| S3704238536 > S3704238218 | 401 m | 8 | **grow-in** | grow-in | 34 / 4 |
+| S3704238218 > S4297189776 | 315 m | 6 | none | grow-in | 17 / 0 |
+| S4297189776 > S4297189775 | 468 m | 9 | **grow-in** | grow-in | 54 / 9 |
+
+Every span is bound-dependent; 107 of the 133 possible strike trees and all 13 certain ones stand in a span. Six of the 30 stations lie before the first or after the last tagged structure inside the data and belong to no span; the upper conductor bound is unknown there anyway. Span ids are the OSM node ids of the end structures, so they survive a re-run, a new LiDAR epoch and a different CRS.
+
 ## Wires do not generalise across space here
 
 | class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
