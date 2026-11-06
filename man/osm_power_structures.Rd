@@ -6,13 +6,19 @@
 \usage{
 osm_power_structures(
   aoi,
-  overpass_url = "https://overpass-api.de/api/interpreter"
+  overpass_url = "https://overpass-api.de/api/interpreter",
+  date = NULL
 )
 }
 \arguments{
 \item{aoi}{An \code{sf}/\code{sfc} object or \code{bbox} defining the search window.}
 
 \item{overpass_url}{Overpass endpoint.}
+
+\item{date}{Optional OSM snapshot to query, as \code{"YYYY-MM-DDThh:mm:ssZ"}:
+an Overpass attic query (\verb{[date:...]}) answers from the map as it was
+then, so a rerun months later fetches the same geometry. \code{NULL}
+queries the current map.}
 }
 \value{
 An \code{sf} POINT data frame (EPSG:4326) with \code{osm_id}, \code{type},

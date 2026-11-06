@@ -67,3 +67,12 @@ test_that("a tile counts as complete only at the size TNM reported (#16)", {
   writeBin(raw(0), f)
   expect_false(tile_complete(f, NA))            # empty never counts
 })
+
+test_that("an Overpass query can be pinned to an OSM snapshot (#56)", {
+  expect_equal(overpass_header(), "[out:json][timeout:90];")
+  expect_equal(overpass_header("2026-10-19T14:01:07Z"), '[out:json][timeout:90][date:"2026-10-19T14:01:07Z"];')
+  expect_error(overpass_header("2026-10-19"), "UTC instant")
+  expect_error(overpass_header(c("2026-10-19T14:01:07Z", "2026-10-19T14:01:07Z")), "UTC instant")
+  expect_match(power_line_selector(sf::st_bbox(c(xmin = -105.4, ymin = 40, xmax = -105.3, ymax = 40.1), crs = 4326), "line"),
+               '^way\\["power"="line"\\]')
+})

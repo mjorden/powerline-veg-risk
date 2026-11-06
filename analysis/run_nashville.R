@@ -9,6 +9,9 @@
 # State Plane, US survey feet - exercises the unit handling) on first run.
 # This delivery classifies vegetation (3-5) and buildings (6), which are used
 # as independent ground truth for the classifier.
+#
+# Run analysis/run_sunshine_canyon.R first: this run scores the Colorado
+# model (transfer_from) and stops if output/sunshine/model.rds is missing.
 
 source("analysis/pipeline.R")
 
@@ -17,6 +20,7 @@ run_case_study(list(
   source = "USGS 3DEP 2022 LiDAR (TN_DavidsonCounty_D22)",
   title = "Vegetation risk along the TVA Maury\u2013Davidson 500 kV line",
   line_ids = "19556523",               # OSM way "Maury - Davidson", 500 kV
+  osm_date = "2026-10-19T14:01:07Z",   # OSM snapshot the cached layers come from (attic query, #56)
   window_m = c(1500, 3500),            # chainage from the Davidson (north) end
   start_north = TRUE,
   project = "TN_DavidsonCounty_D22",

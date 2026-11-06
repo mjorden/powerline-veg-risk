@@ -132,23 +132,28 @@ tile_complete <- function(path, size_bytes = NA) {
 #'   would otherwise be taught to the classifier as vegetation. Underground
 #'   `cable` is deliberately left out. Ignored when `ids` is given.
 #' @param overpass_url Overpass endpoint.
+#' @param date Optional OSM snapshot to query, as `"YYYY-MM-DDThh:mm:ssZ"`:
+#'   an Overpass attic query (`[date:...]`) answers from the map as it was
+#'   then, so a rerun months later fetches the same geometry. `NULL`
+#'   queries the current map.
 #' @return An `sf` LINESTRING data frame (EPSG:4326) with `osm_id`, `name`,
 #'   `power`, `voltage_kv`, `operator`, `ref`, `circuits`, `cables`,
 #'   `wires` and `tags` (every tag of the way as a JSON string, so nothing
 #'   needed later for conflation is lost at fetch). Attributes `osm_timestamp` (the
 #'   OSM data snapshot the answer came from) and `osm_query` record the
-#'   provenance; [osm_power_structures()] and [osm_buildings()] carry the
-#'   same two.
+#'   provenance, and `osm_date` the pinned snapshot (`NA` when the current
+#'   map was queried); [osm_power_structures()] and [osm_buildings()] carry
+#'   the same three.
 #' @export
 osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_line"),
-                            overpass_url = "https://overpass-api.de/api/interpreter") {
+                            overpass_url = "https://overpass-api.de/api/interpreter", date = NULL) {
   if (is.null(ids)) {
     if (is.null(aoi)) rlang::abort("Supply `aoi` or `ids`.")
     sel <- power_line_selector(aoi, power)
   } else {
     sel <- sprintf("way(id:%s);", paste(ids, collapse = ","))
   }
-  els <- overpass(paste0("[out:json][timeout:90];", sel, "out geom tags;"), overpass_url)
+  els <- overpass(paste0(overpass_header(date), sel, "out geom tags;"), overpass_url)
   if (length(els) == 0) rlang::abort("Overpass returned no power lines.")
 
   tag <- function(e, k) e$tags[[k]] %||% NA_character_
@@ -173,7 +178,7 @@ osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_lin
       sf::st_linestring(do.call(rbind, lapply(e$geometry, function(p) c(p$lon, p$lat))))
     }), crs = 4326)
   )
-  osm_provenance(out, els)
+  osm_provenance(out, els, date)
 }
 
 #' Fetch power-line support structures (poles, towers) from OpenStreetMap
@@ -185,11 +190,12 @@ osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_lin
 #'   zero rows when the area has none (sf gives an empty geometry column
 #'   the class `sfc_GEOMETRY`, so test `nrow()`, not the class).
 #' @export
-osm_power_structures <- function(aoi, overpass_url = "https://overpass-api.de/api/interpreter") {
-  bb <- osm_bbox(aoi)
-  els <- overpass(sprintf(
-    '[out:json][timeout:90];(node["power"="tower"](%s);node["power"="pole"](%s););out;', bb, bb
-  ), overpass_url)
+osm_power_structures <- function(aoi, overpass_url = "https://overpass-api.de/api/interpreter",
+                                 date = NULL) {
+  # One clause with a tag regex, not a union of two: the same nodes, and
+  # an attic query of the union form has run the server out of memory.
+  els <- overpass(sprintf('%snode["power"~"^(tower|pole)$"](%s);out;', overpass_header(date), osm_bbox(aoi)),
+                  overpass_url)
   out <- if (length(els) == 0) {
     sf::st_sf(osm_id = character(), type = character(), ref = character(), tags = character(),
               geometry = empty_sfc("POINT"))
@@ -202,7 +208,7 @@ osm_power_structures <- function(aoi, overpass_url = "https://overpass-api.de/ap
       geometry = sf::st_sfc(lapply(els, function(e) sf::st_point(c(e$lon, e$lat))), crs = 4326)
     )
   }
-  osm_provenance(out, els)
+  osm_provenance(out, els, date)
 }
 
 #' Fetch building footprints from OpenStreetMap
@@ -215,8 +221,8 @@ osm_power_structures <- function(aoi, overpass_url = "https://overpass-api.de/ap
 #'   when the area has none (an empty geometry column is `sfc_GEOMETRY`;
 #'   test `nrow()`, not the class).
 #' @export
-osm_buildings <- function(aoi, overpass_url = "https://overpass-api.de/api/interpreter") {
-  els <- overpass(sprintf('[out:json][timeout:90];way["building"](%s);out geom;', osm_bbox(aoi)),
+osm_buildings <- function(aoi, overpass_url = "https://overpass-api.de/api/interpreter", date = NULL) {
+  els <- overpass(sprintf('%sway["building"](%s);out geom;', overpass_header(date), osm_bbox(aoi)),
                   overpass_url)
   closed <- Filter(function(e) {
     g <- e$geometry
@@ -232,7 +238,7 @@ osm_buildings <- function(aoi, overpass_url = "https://overpass-api.de/api/inter
       }), crs = 4326)
     )
   }
-  osm_provenance(out, els)
+  osm_provenance(out, els, date)
 }
 
 # A zero-length EPSG:4326 geometry column for an empty answer. sf gives
@@ -244,9 +250,12 @@ empty_sfc <- function(type = c("POINT", "POLYGON", "LINESTRING")) {
   sf::st_sfc(crs = 4326)
 }
 
-osm_provenance <- function(out, els) {
+# The server's base timestamp is the database time, not the attic instant,
+# so a pinned date is carried separately.
+osm_provenance <- function(out, els, date = NULL) {
   attr(out, "osm_timestamp") <- attr(els, "osm_timestamp")
   attr(out, "osm_query") <- attr(els, "osm_query")
+  attr(out, "osm_date") <- if (is.null(date)) NA_character_ else date
   out
 }
 
@@ -258,6 +267,18 @@ power_line_selector <- function(aoi, power) {
   } else {
     sprintf('way["power"~"^(%s)$"](%s);', paste(power, collapse = "|"), osm_bbox(aoi))
   }
+}
+
+# Overpass query settings. With `date`, an attic query: the answer is the
+# map as it was at that instant, whichever server answers and whenever it
+# is asked, so a pinned date makes the OSM input reproducible (#56).
+overpass_header <- function(date = NULL, timeout_s = 90) {
+  if (is.null(date)) return(sprintf("[out:json][timeout:%d];", timeout_s))
+  if (!is.character(date) || length(date) != 1 ||
+      !grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", date)) {
+    rlang::abort("`date` must be one UTC instant as \"YYYY-MM-DDThh:mm:ssZ\".")
+  }
+  sprintf('[out:json][timeout:%d][date:"%s"];', timeout_s, date)
 }
 
 # Overpass bbox string: south,west,north,east
