@@ -5,7 +5,15 @@
 # output/<id>/latest.txt names the last complete run and output/<id>/runs.csv
 # indexes them all (#54). Caches that outlive a run (model.rds, vendor.rds,
 # the Landsat composite, the wind record) stay in output/<id>/. Figures go
-# to man/figures/<id>_*.png, cached OSM layers to data-raw/<id>/.
+# to man/figures/<id>_*.png, cached OSM layers to data-raw/<id>/. Every
+# cache is content-addressed (#56): keyed by a hash of the request that
+# produced it, with a sidecar that is required on load and compared with the
+# request being made (R/cache.R). VEGRISK_REFRESH=<kind>,... (or "all")
+# refetches a kind; VEGRISK_OFFLINE=1 refuses to fetch anything.
+#
+# Run order: Nashville scores the Colorado model (transfer_from = "sunshine"),
+# so run Sunshine Canyon first; Nashville stops if output/sunshine/model.rds
+# is missing, and records which model it scored.
 
 devtools::load_all(quiet = TRUE)
 suppressPackageStartupMessages({
@@ -117,34 +125,43 @@ run_case_study_impl <- function(cfg, ctx) {
     fire_wind_hours = defaults_of(fire_wind_hours),
     wind_fall_exposure = defaults_of(wind_fall_exposure)
   )
-  # OSM layers are cached as GeoJSON with a sidecar recording the OSM
-  # snapshot time and the query. An empty answer is not cached: Overpass
-  # aborts are refused upstream (#8), but a genuinely empty area is still
-  # re-queried next run rather than frozen.
-  cache <- function(path, expr) {
-    meta_path <- paste0(path, ".meta.json")
-    if (file.exists(path)) {
-      ctx$inputs$osm[[basename(path)]] <- c(file_record(path),
-        if (file.exists(meta_path)) jsonlite::read_json(meta_path) else list(sidecar = "missing"))
-      return(st_read(path, quiet = TRUE))
-    }
-    x <- expr
-    if (nrow(x) == 0) {
-      warning(sprintf("%s: OSM returned nothing; not cached, will be re-queried next run.", basename(path)),
-              call. = FALSE)
-      return(x)
-    }
-    st_write(x, path, quiet = TRUE)
-    jsonlite::write_json(list(osm_timestamp = attr(x, "osm_timestamp"), query = attr(x, "osm_query"),
-                              fetched_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
-                              n = nrow(x)),
-                         meta_path, auto_unbox = TRUE, pretty = TRUE)
-    ctx$inputs$osm[[basename(path)]] <- c(file_record(path), jsonlite::read_json(meta_path))
+  or <- function(x, default) if (is.null(x)) default else x
+  # OSM layers: GeoJSON keyed by the request (ids or AOI, tag values, the
+  # pinned OSM date), the sidecar carrying the OSM snapshot time and the
+  # query (#56). An empty answer is not cached: Overpass aborts are refused
+  # upstream (#8), but a genuinely empty area is still re-queried next run
+  # rather than frozen.
+  osm_cache <- function(kind, args, fetch) {
+    x <- cache_get(kind, c(args, list(date = cfg$osm_date)), dir = raw, ext = "geojson",
+                   refresh = cache_policy(kind),
+                   fetch = function() {
+                     y <- fetch()
+                     if (nrow(y) == 0) {
+                       warning(sprintf("%s: OSM returned nothing; not cached, will be re-queried next run.", kind),
+                               call. = FALSE)
+                       attr(y, "cache_skip") <- "empty answer"
+                     }
+                     y
+                   },
+                   read = function(path, meta) {
+                     y <- st_read(path, quiet = TRUE)
+                     attr(y, "osm_timestamp") <- meta$source$osm_timestamp
+                     attr(y, "osm_date") <- meta$source$osm_date
+                     attr(y, "osm_query") <- meta$source$query
+                     y
+                   },
+                   write = function(y, path) st_write(y, path, driver = "GeoJSON", quiet = TRUE),
+                   extra = function(y) list(osm_timestamp = attr(y, "osm_timestamp"), osm_date = attr(y, "osm_date"),
+                                            query = attr(y, "osm_query")))
+    ctx$inputs$osm[[kind]] <- attr(x, "cache")
     x
   }
+  # An AOI as a cache argument: its EPSG:4326 bounding box to ~0.1 m.
+  bbox_args <- function(g) as.list(round(st_bbox(st_transform(st_as_sfc(st_bbox(g)), 4326)), 6))
 
   # --- 1. Inputs --------------------------------------------------------------
-  lines <- cache(file.path(raw, "osm_line.geojson"), osm_power_lines(ids = cfg$line_ids))
+  lines <- osm_cache("osm_line", list(ids = cfg$line_ids),
+                     function() osm_power_lines(ids = cfg$line_ids, date = cfg$osm_date))
   files <- file.path("data-raw/laz", cfg$id, cfg$tiles)
   if (!all(file.exists(files))) { # query The National Map only when tiles are missing
     tiles <- tnm_lidar_tiles(st_buffer(st_transform(lines, 4326), 0.001), project = cfg$project)
@@ -183,11 +200,14 @@ run_case_study_impl <- function(cfg, ctx) {
   st_agr(study) <- "constant"
   study <- st_intersection(study, st_buffer(extent, -cfg$half_width_m / m))
   aoi <- st_buffer(study, 100 / m)
-  structures <- cache(file.path(raw, "osm_structures.geojson"), osm_power_structures(aoi))
-  buildings  <- cache(file.path(raw, "osm_buildings.geojson"), osm_buildings(aoi))
+  structures <- osm_cache("osm_structures", list(aoi = bbox_args(aoi)),
+                          function() osm_power_structures(aoi, date = cfg$osm_date))
+  buildings  <- osm_cache("osm_buildings", list(aoi = bbox_args(aoi)),
+                          function() osm_buildings(aoi, date = cfg$osm_date))
   # Every mapped line in the area: rights-of-way are often shared, and the
   # other circuits' conductors need wire labels too.
-  context <- cache(file.path(raw, "osm_lines_context.geojson"), osm_power_lines(aoi))
+  context <- osm_cache("osm_lines_context", list(aoi = bbox_args(aoi), power = c("line", "minor_line")),
+                       function() osm_power_lines(aoi, power = c("line", "minor_line"), date = cfg$osm_date))
   step(sprintf("line in study area: %.0f m; %d mapped structures; %d buildings",
                sum(as.numeric(st_length(study))) * m, nrow(structures), nrow(buildings)))
 
@@ -214,12 +234,29 @@ run_case_study_impl <- function(cfg, ctx) {
   # written in one atomic step, so a rerun can never pair a new model with
   # an old run's metrics; summary.rds records which run it came from (#30).
   fit_path <- file.path(out, "model.rds")
+  # What the saved model may be reused for (#56): the labelled points, the
+  # parameters behind the labels and features, the tiles, the package
+  # version. A model fitted on anything else is refused, not reused.
+  fingerprint <- training_fingerprint(
+    feat,
+    params = list(half_width_m = cfg$half_width_m, wire_search_m = cfg$wire_search_m,
+                  block_m = 100, n_folds = 5,
+                  point_features = ctx$params$point_features, weak_labels = ctx$params$weak_labels,
+                  train_point_classifier = ctx$params$train_point_classifier,
+                  cv_point_classifier = ctx$params$cv_point_classifier),
+    tiles = tiles_info$md5)
+  ctx$inputs$training_fingerprint <- fingerprint
   reuse <- Sys.getenv("VEGRISK_REUSE") == "1" && file.exists(fit_path)
   ctx$reuse <- reuse
   if (reuse) {
     fit <- readRDS(fit_path)
     if (is.null(fit$cv)) stop(fit_path, " predates the run record (#30); run once without VEGRISK_REUSE.",
                               call. = FALSE)
+    differs <- fingerprint_diff(fit$fingerprint, fingerprint)
+    if (!isTRUE(differs)) {
+      stop(sprintf("%s was fitted on other inputs (%s differ); run once without VEGRISK_REUSE.",
+                   fit_path, paste(differs, collapse = ", ")), call. = FALSE)
+    }
     model <- fit$model
     cv <- fit$cv
     metrics <- cv$metrics
@@ -240,6 +277,7 @@ run_case_study_impl <- function(cfg, ctx) {
     step("cross-validation done")
     model <- train_point_classifier(feat)
     fit <- list(run_id = run_id, fitted_at = t0, git_sha = git_sha(), model = model,
+                fingerprint = fingerprint,
                 cv = list(metrics = metrics, summary = cv_summary,
                           confusion = cv$confusion, fold_counts = cv$fold_counts))
     save_rds(fit, fit_path)
@@ -317,13 +355,22 @@ run_case_study_impl <- function(cfg, ctx) {
 
   # --- 5. Classifier vs vendor ground truth -------------------------------------
   # The vendor evaluation is reused only when it was computed from the model
-  # being reused (same run id); otherwise it is recomputed.
+  # being reused and the same transfer model (run id and checksums, #56);
+  # otherwise it is recomputed.
   vendor <- NULL
   vendor_path <- file.path(out, "vendor.rds")
+  model_md5 <- unname(tools::md5sum(fit_path))
+  transfer_path <- if (!is.null(cfg$transfer_from)) file.path("output", cfg$transfer_from, "model.rds")
+  if (!is.null(transfer_path) && !file.exists(transfer_path)) {
+    stop(sprintf("transfer model %s is missing: run analysis/run_%s*.R first (see the run order in pipeline.R).",
+                 transfer_path, cfg$transfer_from), call. = FALSE)
+  }
+  transfer_md5 <- if (!is.null(transfer_path)) unname(tools::md5sum(transfer_path))
   if (reuse && file.exists(vendor_path)) {
     v <- readRDS(vendor_path)
-    if (identical(v$model_run_id, fit$run_id)) vendor <- v$vendor
-    else step("vendor evaluation on disk is from another run; recomputing")
+    if (identical(v$model_run_id, fit$run_id) && identical(v$model_md5, model_md5) &&
+        identical(v$transfer_md5, transfer_md5)) vendor <- v$vendor
+    else step("vendor evaluation on disk is from another model or transfer model; recomputing")
   }
   if (is.null(vendor) && has_vendor) {
     sc <- !conductor_zone  # same scored set for every method
@@ -345,10 +392,11 @@ run_case_study_impl <- function(cfg, ctx) {
       model = evaluate_vendor_classes(pred$pred[sc], vc[sc]),
       model_wire = wire_skill(pred$pred, raw_wire(model))
     )
-    if (!is.null(cfg$transfer_from)) {
-      path <- file.path("output", cfg$transfer_from, "model.rds")
+    if (!is.null(transfer_path)) {
+      path <- transfer_path
       other_fit <- readRDS(path)
-      ctx$inputs$transfer_model <- c(file_record(path), list(fitted_run_id = other_fit$run_id))
+      ctx$inputs$transfer_model <- c(file_record(path), list(fitted_run_id = other_fit$run_id,
+                                                             fingerprint = other_fit$fingerprint))
       if (is.null(other_fit$model)) stop(path, " predates the run record (#30); re-run ",
                                          cfg$transfer_from, " first.", call. = FALSE)
       other <- other_fit$model
@@ -367,7 +415,8 @@ run_case_study_impl <- function(cfg, ctx) {
     ref <- cv_point_classifier(vfeat, random = FALSE)
     vendor$reference <- ref$metrics
     vendor$reference_summary <- ref$summary
-    save_rds(list(model_run_id = fit$run_id, vendor = vendor), vendor_path)
+    save_rds(list(model_run_id = fit$run_id, model_md5 = model_md5, transfer_md5 = transfer_md5,
+                  vendor = vendor), vendor_path)
 
     step("vendor classes in the conductor zone, and of rule-labelled conductor returns:")
     print(vendor$conductor_zone_vendor_class)
@@ -444,43 +493,53 @@ run_case_study_impl <- function(cfg, ctx) {
   dryness <- NULL
   if (!is.null(cfg[["landsat"]])) {
     lc <- cfg[["landsat"]]
-    comp_path <- file.path(out, "landsat_composite.tif")
-    scenes_path <- file.path(out, "landsat_scenes.csv")
-    # landsat_scenes.csv lists every scene found, with `used` and
-    # `skip_reason`. A composite that lost scenes to read errors (not to
-    # "no coverage") is used this run but not cached, so a network blip
-    # cannot become permanent (#30).
-    if (file.exists(comp_path) && file.exists(scenes_path)) {
-      comp <- terra::rast(comp_path)
-      scene_log <- fread(scenes_path)
-      if (!"used" %in% names(scene_log)) scene_log[, `:=`(used = TRUE, skip_reason = NA_character_)]
-      used <- scene_log[used == TRUE]
-      attr(comp, "scenes") <- used$id
-      attr(comp, "dates") <- as.Date(used$datetime)
-      attr(comp, "scene_log") <- as.data.frame(scene_log)
-    } else {
-      corridor_area <- st_buffer(study, cfg$half_width_m / m)
-      scenes <- landsat_scenes(corridor_area, years = lc$years, months = lc$months)
-      comp <- landsat_composite(scenes, corridor_area)
-      scene_log <- merge(scenes[, c("id", "datetime", "platform", "cloud_cover")],
-                         attr(comp, "scene_log")[, c("id", "used", "skip_reason")], by = "id")
-      errored <- !scene_log$used & !scene_log$skip_reason %in% "no coverage"
-      max_err <- if (is.null(lc$max_error_frac)) 0.2 else lc$max_error_frac
-      if (mean(errored) > max_err) {
-        warning(sprintf(paste("Landsat: %d of %d scenes failed to read; the composite is used for this run",
-                              "but not cached. Re-run, or raise landsat$max_error_frac to accept it."),
-                        sum(errored), nrow(scene_log)), call. = FALSE)
-      } else {
-        terra::writeRaster(comp, comp_path, overwrite = TRUE)
-        fwrite(scene_log, scenes_path)
-      }
-    }
+    # The composite is keyed by the corridor extent, years, months, cloud
+    # limit and platforms (#56); its sidecar lists every scene found, with
+    # `used` and `skip_reason`. A composite that lost scenes to read errors
+    # (not to "no coverage") is used this run but not cached, so a network
+    # blip cannot become permanent (#30).
+    corridor_area <- st_buffer(study, cfg$half_width_m / m)
+    lc_args <- list(aoi = bbox_args(corridor_area), years = lc$years, months = or(lc$months, 7:9),
+                    max_cloud = or(lc$max_cloud, 50), platforms = or(lc$platforms, c("landsat-8", "landsat-9")),
+                    buffer_m = 100)
+    comp <- cache_get(
+      "landsat_composite", lc_args, dir = out, ext = "tif", refresh = cache_policy("landsat_composite"),
+      fetch = function() {
+        scenes <- landsat_scenes(corridor_area, years = lc_args$years, months = lc_args$months,
+                                 max_cloud = lc_args$max_cloud, platforms = lc_args$platforms)
+        comp <- landsat_composite(scenes, corridor_area, buffer_m = lc_args$buffer_m)
+        scene_log <- merge(scenes[, c("id", "datetime", "platform", "cloud_cover")],
+                           attr(comp, "scene_log")[, c("id", "used", "skip_reason")], by = "id")
+        errored <- !scene_log$used & !scene_log$skip_reason %in% "no coverage"
+        max_err <- or(lc$max_error_frac, 0.2)
+        if (mean(errored) > max_err) {
+          warning(sprintf(paste("Landsat: %d of %d scenes failed to read; the composite is used for this run",
+                                "but not cached. Re-run, or raise landsat$max_error_frac to accept it."),
+                          sum(errored), nrow(scene_log)), call. = FALSE)
+          attr(comp, "cache_skip") <- sprintf("%d of %d scenes failed to read", sum(errored), nrow(scene_log))
+        }
+        attr(comp, "scene_log") <- as.data.frame(scene_log)
+        comp
+      },
+      read = function(path, meta) {
+        comp <- terra::rast(path)
+        scene_log <- as.data.frame(meta$source$scenes)
+        used <- scene_log[scene_log$used, ]
+        attr(comp, "scenes") <- used$id
+        attr(comp, "dates") <- as.Date(used$datetime)
+        attr(comp, "scene_log") <- scene_log
+        comp
+      },
+      write = function(x, path) terra::writeRaster(x, path, filetype = "GTiff", overwrite = TRUE),
+      extra = function(x) list(scenes = attr(x, "scene_log")))
+    scene_log <- attr(comp, "scene_log")
+    fwrite(scene_log, file.path(run_dir, "landsat_scenes.csv"), eol = "\n")
+    record_output(file.path(run_dir, "landsat_scenes.csv"), scene_log)
     scene_counts <- c(found = nrow(scene_log), used = sum(scene_log$used),
                       no_coverage = sum(scene_log$skip_reason %in% "no coverage"),
                       error = sum(!scene_log$used & !scene_log$skip_reason %in% "no coverage"))
-    ctx$inputs$landsat <- list(config = lc, scene_counts = as.list(scene_counts),
-                               composite = if (file.exists(comp_path)) file_record(comp_path),
-                               scenes = if (file.exists(scenes_path)) file_record(scenes_path, scene_log),
+    ctx$inputs$landsat <- list(config = lc, request = lc_args, scene_counts = as.list(scene_counts),
+                               composite = attr(comp, "cache"),
                                scene_ids = scene_log$id[scene_log$used])
     dryness <- canopy_dryness(comp, rasters, profile, risk, zone_m = cfg$under_line_m,
                               corridor_m = cfg$half_width_m,
@@ -506,19 +565,25 @@ run_case_study_impl <- function(cfg, ctx) {
   # geometry to the live NWS forecast.
   if (!is.null(cfg[["wind"]])) { # [[ ]]: cfg$wind would partial-match window_m
     wc <- cfg[["wind"]]
-    wind_path <- file.path(out, "wind_hourly.csv")
-    if (file.exists(wind_path)) {
-      wind <- fread(wind_path)
-      wind$time <- as.POSIXct(wind$time, tz = "UTC")
-      ll <- readRDS(file.path(out, "wind_cell.rds"))
-      attr(wind, "lon") <- ll[1]
-      attr(wind, "lat") <- ll[2]
-    } else {
-      wind <- wind_history(study, wc$start, wc$end)
-      fwrite(wind, wind_path)
-      saveRDS(c(attr(wind, "lon"), attr(wind, "lat")), file.path(out, "wind_cell.rds"))
-    }
-    ctx$inputs$wind <- list(config = wc, record = file_record(wind_path),
+    # The hourly record is keyed by the query point, dates and endpoint;
+    # the grid cell it came from lives in the sidecar, not a file of its
+    # own that a crash could orphan (#56).
+    ll <- aoi_lonlat(study)
+    wind_args <- list(lon = round(ll[1], 4), lat = round(ll[2], 4),
+                      start = format(as.Date(wc$start)), end = format(as.Date(wc$end)), url = openmeteo_archive)
+    wind <- cache_get(
+      "wind_hourly", wind_args, dir = out, ext = "csv", refresh = cache_policy("wind_hourly"),
+      fetch = function() wind_history(study, wc$start, wc$end),
+      read = function(path, meta) {
+        w <- fread(path)
+        w$time <- as.POSIXct(w$time, tz = "UTC")
+        attr(w, "lon") <- meta$source$lon
+        attr(w, "lat") <- meta$source$lat
+        w
+      },
+      write = function(x, path) fwrite(x, path),
+      extra = function(x) list(lon = attr(x, "lon"), lat = attr(x, "lat")))
+    ctx$inputs$wind <- list(config = wc, request = wind_args, record = attr(wind, "cache"),
                             cell_lon = attr(wind, "lon"), cell_lat = attr(wind, "lat"),
                             n_hours = nrow(wind), from = format(min(wind$time)), to = format(max(wind$time)))
     fw <- fire_wind_hours(wind, gust_quantile = if (is.null(wc$gust_quantile)) 0.95 else wc$gust_quantile,
@@ -575,7 +640,8 @@ run_case_study_impl <- function(cfg, ctx) {
   write_table(st_drop_geometry(risk$spans), "spans.csv")
   write_table(profile, "conductor_profile.csv")
   summary <- list(run = list(id = run_id, started = t0, git_sha = git_sha(),
-                             model_run_id = fit$run_id, reused_from = reused_from),
+                             model_run_id = fit$run_id, reused_from = reused_from,
+                             training_fingerprint = fingerprint$hash),
                   lidar = list(project = cfg$project, tiles = tiles_info,
                                gps_time_type = vintage$gps_time_type, n_timed = vintage$n,
                                flight_from = vintage$from, flight_median = vintage$median, flight_to = vintage$to),

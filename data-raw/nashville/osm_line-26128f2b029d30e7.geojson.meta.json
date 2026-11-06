@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "osm_line",
+  "key": "26128f2b029d30e7",
+  "request": "{\"args\":{\"date\":\"2026-10-19T14:01:07Z\",\"ids\":\"19556523\"},\"kind\":\"osm_line\",\"upstream\":null}",
+  "args": {
+    "ids": "19556523",
+    "date": "2026-10-19T14:01:07Z"
+  },
+  "upstream": null,
+  "fetched_at": "2026-11-06T22:08:34Z",
+  "vegrisk_version": "0.1.0",
+  "file": {
+    "file": "osm_line-26128f2b029d30e7.geojson",
+    "bytes": 4483,
+    "md5": "693fb8187d1519d21792ad8dde336262"
+  },
+  "n": 1,
+  "source": {
+    "osm_timestamp": "2026-11-06T22:07:06Z",
+    "osm_date": "2026-10-19T14:01:07Z",
+    "query": "[out:json][timeout:90][date:\"2026-10-19T14:01:07Z\"];way(id:19556523);out geom tags;"
+  }
+}

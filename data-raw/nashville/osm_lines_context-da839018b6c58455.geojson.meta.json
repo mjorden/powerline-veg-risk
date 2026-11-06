@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "osm_lines_context",
+  "key": "da839018b6c58455",
+  "request": "{\"args\":{\"aoi\":{\"xmax\":-86.978112,\"xmin\":-86.982486,\"ymax\":36.055292,\"ymin\":36.035536},\"date\":\"2026-10-19T14:01:07Z\",\"power\":[\"line\",\"minor_line\"]},\"kind\":\"osm_lines_context\",\"upstream\":null}",
+  "args": {
+    "aoi": {
+      "xmin": -86.982486,
+      "ymin": 36.035536,
+      "xmax": -86.978112,
+      "ymax": 36.055292
+    },
+    "power": ["line", "minor_line"],
+    "date": "2026-10-19T14:01:07Z"
+  },
+  "upstream": null,
+  "fetched_at": "2026-11-06T22:10:12Z",
+  "vegrisk_version": "0.1.0",
+  "file": {
+    "file": "osm_lines_context-da839018b6c58455.geojson",
+    "bytes": 15457,
+    "md5": "5097fde6331ea1af01504ab96c5fa876"
+  },
+  "n": 9,
+  "source": {
+    "osm_timestamp": "2026-11-06T22:09:06Z",
+    "osm_date": "2026-10-19T14:01:07Z",
+    "query": "[out:json][timeout:90][date:\"2026-10-19T14:01:07Z\"];way[\"power\"~\"^(line|minor_line)$\"](36.035536,-86.982486,36.055292,-86.978112);out geom tags;"
+  }
+}

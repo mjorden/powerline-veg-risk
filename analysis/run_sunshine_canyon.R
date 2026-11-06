@@ -14,6 +14,7 @@ run_case_study(list(
   source = "USGS 3DEP 2020 LiDAR (CO_DRCOG_2020)",
   title = "Vegetation risk along the Sunshine\u2013Boulder Hydro 115 kV line",
   line_ids = "1381464850",             # OSM way "Sunshine to Boulder Hydro"
+  osm_date = "2026-10-19T14:01:07Z",   # OSM snapshot the cached layers come from (attic query, #56)
   project = "CO_DRCOG_2020",
   tiles = sprintf("USGS_LPC_CO_DRCOG_2020_B20_%s.laz", c("w0472n4429", "w0472n4430")),
   half_width_m = 45,
