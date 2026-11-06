@@ -255,7 +255,7 @@ run_case_study_impl <- function(cfg, ctx) {
   pred <- predict_points(model, feat)
   print(table(predicted = pred$pred, weak_label = pred$label, useNA = "ifany"))
 
-  vc <- las$Classification[feat$pid]
+  vc <- feat$class_code  # the delivered class, carried on the table (#55)
   has_vendor <- isTRUE(cfg$vendor_classes)
   vendor_bldg <- if (has_vendor) vc == 6L else NULL
 
@@ -266,7 +266,8 @@ run_case_study_impl <- function(cfg, ctx) {
   spans <- line_spans(lines, structures, crs)
   step(sprintf("spans: %d between %d confirmed structures on %d way(s); %d implausibly long (missing structure?)",
                nrow(spans), sum(structures_tbl$confirmed), length(unique(spans$way_id)), sum(spans$implausible)))
-  rasters <- corridor_rasters(las, pred, res_m = 1, drop = vendor_bldg)
+  corridor_poly <- line_corridor(study, crs, cfg$half_width_m)
+  rasters <- corridor_rasters(las, pred, res_m = 1, drop = vendor_bldg, corridor = corridor_poly)
   # Supports for the upper bound: vertices of the *unclipped* line that a
   # tagged pole or tower confirms (#51); every vertex only when none is
   # tagged. Supports outside the data are dropped downstream.
@@ -310,7 +311,7 @@ run_case_study_impl <- function(cfg, ctx) {
 
   # Geometric conductor zone, independent of every labelling method: inside
   # the envelope, where the conductor is measured, within 3 m of it or above.
-  zabs <- las$Zref[feat$pid] * m
+  zabs <- feat$Zref * m
   conductor_zone <- profile$src[pr_all$vertex] == "measured" & pr_all$dist_m <= envelope_m &
     zabs >= profile$z_lo[pr_all$vertex] - 3
 
@@ -390,7 +391,7 @@ run_case_study_impl <- function(cfg, ctx) {
   # --- 6. Risk ----------------------------------------------------------------
   screen <- function(pr, drop = NULL, exclude = TRUE) {
     r <- corridor_rasters(las, pr, res_m = 1, profile = if (exclude) profile,
-                          envelope_m = envelope_m, drop = drop)
+                          envelope_m = envelope_m, drop = drop, corridor = corridor_poly)
     list(rasters = r, risk = assess_risk(r, profile, segments, phase_offset_m = cfg$phase_offset_m,
                                          growth_m = growth_m,
                                          under_line_m = cfg$under_line_m, wire_zone_m = cfg$wire_zone_m,
@@ -402,7 +403,8 @@ run_case_study_impl <- function(cfg, ctx) {
   risk <- ours$risk
   # Valid-from for every segment: the flight window of its own returns.
   if (!is.null(vintage$time)) {
-    fw <- segment_flight_window(vintage$time[feat$pid], profile$seg_id[pr_all$vertex])
+    fw <- segment_flight_window(as.POSIXct(feat$gpstime + 1e9, origin = "1980-01-06", tz = "UTC"),
+                                profile$seg_id[pr_all$vertex])
     risk$segments <- merge(risk$segments, fw, by = "seg_id", all.x = TRUE)
   }
   step(sprintf("excluded %s wire-like conductor-envelope points from the canopy model",

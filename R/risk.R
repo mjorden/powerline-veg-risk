@@ -145,6 +145,10 @@ segment_lines <- function(lines, crs, seg_m = 50, ways = NULL) {
 #' @param void_m Width of the square window (metres) that must contain no
 #'   LiDAR return of any class for a cell to count as a void. Wide enough
 #'   that ordinary point spacing never empties it (3DEP QL2 is >= 2 pts/m^2).
+#' @param corridor Optional polygon (`sf`/`sfc`, any CRS) to crop and mask
+#'   every raster to. The LAS bounding box of a long diagonal corridor is
+#'   mostly empty; masking keeps every later cell table proportional to the
+#'   corridor rather than to its bounding box (#55).
 #' @return A list with `dtm` (ground elevation) and `chm` (canopy height),
 #'   both `SpatRaster` in metres, `unobserved` (logical `SpatRaster`), `void`
 #'   (logical `SpatRaster`, the voids alone), `n_conductor_excluded` and
@@ -153,10 +157,16 @@ segment_lines <- function(lines, crs, seg_m = 50, ways = NULL) {
 #' @export
 corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 15,
                              below_m = 1, min_linearity = 0.6, gap_m = 1.5, drop = NULL,
-                             void_m = 5, linearity = NULL) {
+                             void_m = 5, linearity = NULL, corridor = NULL) {
   pred <- as_point_table(pred, "pred")
+  check_las_match(las, pred)
   m <- las_m_per_unit(las)
   res <- res_m / m
+  crs <- sf::st_crs(las)
+  # Absolute elevation and normalised height per point come from the table
+  # itself; indexing `las` by row is the fallback for hand-built tables.
+  zref <- point_column(pred, las, "Zref")
+  zrel <- if ("Z" %in% names(pred)) pred$Z else pred$height_m / m
   dtm <- lidR::rasterize_terrain(lidR::unnormalize_height(las), res, lidR::tin())
   consensus <- pred$pred == "vegetation" & pred$label %in% "vegetation"
   if (!is.null(drop)) consensus <- consensus & !drop
@@ -167,7 +177,7 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
   if (!is.null(profile) && any(profile$src == "measured")) {
     cand <- which(consensus)
     pr <- line_project(as.matrix(pred[cand, c("X", "Y")]), profile, m)
-    zabs <- las$Zref[pred$pid[cand]] * m
+    zabs <- zref[cand] * m
     meas <- profile$src[pr$vertex] == "measured"
     near <- meas & pr$dist_m <= envelope_m & zabs >= profile$z_lo[pr$vertex] - below_m
     if (is.null(linearity)) linearity <- paste0("linearity_k", min(attr(pred, "k") %||% 10L))
@@ -184,7 +194,7 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
     cs <- 1 / m
     band <- profile$z_lo[pr$vertex] - below_m
     allp <- data.table::data.table(cx = floor(pred$X / cs), cy = floor(pred$Y / cs),
-                                   z = las$Zref[pred$pid] * m)
+                                   z = zref * m)
     cc <- data.table::data.table(cx = floor(pred$X[cand][near] / cs),
                                  cy = floor(pred$Y[cand][near] / cs), zb = band[near])
     cc <- cc[, .(zb = min(zb)), by = .(cx, cy)]
@@ -206,26 +216,49 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
     uncertain[hit_rows] <- TRUE
   }
   if (any(consensus)) {
-    veg <- las[pred$pid[consensus]]
+    # The canopy model is built from the table's own coordinates, not by
+    # indexing `las` by row.
+    veg <- suppressMessages(lidR::LAS(data.table::data.table(X = pred$X[consensus], Y = pred$Y[consensus],
+                                                             Z = zrel[consensus]), crs = crs))
     chm <- lidR::rasterize_canopy(veg, res, lidR::p2r(subcircle = 0.15 / m))
     chm <- terra::crop(terra::extend(chm, dtm), dtm)
   } else { # no canopy anywhere (e.g. a cleared corridor)
     chm <- terra::setValues(dtm, NA_real_)
   }
 
-  excluded <- terra::setValues(dtm, FALSE)
-  cells <- terra::cellFromXY(dtm, as.matrix(pred[which(uncertain), c("X", "Y")]))
-  excluded[unique(stats::na.omit(cells))] <- TRUE
+  # Point counts per cell are rasterised by terra (which pages to disk when
+  # the grid is large) rather than tabulated into an R vector of every
+  # cell (#55).
+  count_cells <- function(xy) {
+    if (nrow(xy) == 0) return(terra::setValues(terra::rast(dtm), 0))
+    n <- terra::rasterize(xy, dtm, fun = "count")
+    terra::ifel(is.na(n), 0, n)
+  }
+  excluded <- count_cells(as.matrix(pred[which(uncertain), c("X", "Y")])) > 0
   # Voids: returns of any class (ground included) per cell, summed over the
   # window; NA-padding at the raster edge is ignored.
-  n_ret <- tabulate(stats::na.omit(terra::cellFromXY(dtm, cbind(las$X, las$Y))),
-                    nbins = terra::ncell(dtm))
+  n_ret <- count_cells(cbind(las$X, las$Y))
   w <- 2L * floor(void_m / res_m / 2) + 1L # odd window, no wider than void_m
-  void <- terra::focal(terra::setValues(dtm, n_ret), w = w, fun = "sum", na.rm = TRUE) == 0
+  void <- terra::focal(n_ret, w = w, fun = "sum", na.rm = TRUE) == 0
   unobserved <- (excluded & is.na(chm)) | void
   # Z is assumed to share the horizontal unit (true for both case studies).
-  list(dtm = dtm * m, chm = chm * m, unobserved = unobserved, void = void,
-       n_conductor_excluded = length(hit_rows), n_uncertain_excluded = sum(uncertain))
+  out <- list(dtm = dtm * m, chm = chm * m, unobserved = unobserved, void = void)
+  if (!is.null(corridor)) {
+    poly <- terra::vect(sf::st_transform(sf::st_geometry(corridor), crs))
+    out <- lapply(out, function(x) terra::mask(terra::crop(x, poly, snap = "out"), poly))
+  }
+  c(out, list(n_conductor_excluded = length(hit_rows), n_uncertain_excluded = sum(uncertain)))
+}
+
+# A per-point column from the features table, or from `las` by row index
+# for a hand-built table that still carries `pid` only.
+point_column <- function(pred, las, col) {
+  if (col %in% names(pred) && !all(is.na(pred[[col]]))) return(pred[[col]])
+  if (!"pid" %in% names(pred)) rlang::abort(sprintf("`pred` has neither a `%s` column nor `pid`.", col))
+  v <- las@data[[col]]
+  if (is.null(v)) rlang::abort(sprintf("`las` has no `%s` attribute and `pred` carries none; normalise the heights with read_corridor().", col))
+  if (max(pred$pid, na.rm = TRUE) > length(v)) rlang::abort("`pred$pid` indexes beyond `las`: the table was not featurised from this point cloud.")
+  v[pred$pid]
 }
 
 #' Model conductor elevation along the line
@@ -574,17 +607,25 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   }
 
   # --- canopy cells: cover and grow-in clearance ---------------------------
-  cells <- terra::as.data.frame(c(chm, dtm, observed), xy = TRUE, na.rm = FALSE)
-  names(cells) <- c("x", "y", "h", "ground", "observed")
+  # Only cells within the widest band used by any metric are pulled out of
+  # the rasters, so the table scales with the corridor, not its bounding
+  # box (#55). The band is a flat-ended buffer of the segments, trimmed to
+  # the line's chainage below.
+  band_m <- max(coverage_m, under_line_m, wire_zone_m)
+  band_poly <- terra::vect(sf::st_union(sf::st_buffer(sf::st_geometry(segments), (band_m + 2 * res_of(chm)) / m,
+                                                      endCapStyle = "FLAT")))
+  cells <- terra::extract(c(chm, dtm, observed), band_poly, xy = TRUE, cells = TRUE, ID = FALSE)
+  names(cells)[1:3] <- c("h", "ground", "observed")
+  cells <- cells[, c("x", "y", "h", "ground", "observed")]
+  n_cells_band <- nrow(cells)
   nc <- near(as.matrix(cells[, c("x", "y")]))
   cells$dh <- nc$dh
   cells$seg_id <- nc$seg_id
   # Coverage is counted over every grid cell alongside the line (not past
   # its ends), so cells off the data's edge count as unobserved too.
   band <- nc$inside & nc$dh <= max(coverage_m, under_line_m)
-  seen <- cells[band, c("dh", "seg_id", "observed")]
-  seen$observed <- seen$observed %in% TRUE
-  seen <- split(seen, seen$seg_id)
+  seen <- data.table::data.table(dh = cells$dh[band], seg_id = cells$seg_id[band],
+                                 observed = cells$observed[band] %in% TRUE)
   scored <- cells$observed %in% TRUE & !is.na(cells$h)
   cells <- cells[scored, ]
   nc <- lapply(nc, `[`, scored)
@@ -632,38 +673,43 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   }
 
   # --- per-segment summary --------------------------------------------------
+  # Grouped aggregation, one pass per table, instead of a filter of every
+  # cell and tree for every segment (#55).
   frac_measured <- tapply(profile$src == "measured", profile$seg_id, mean)
   cell_area <- prod(terra::res(chm)) * m^2
-  coverage <- function(sn, width) {
-    if (is.null(sn)) return(0)
-    band <- sn$observed[sn$dh <= width]
-    if (length(band)) mean(band) else 0
+  cdt <- data.table::as.data.table(cells)
+  wz <- cdt[dh <= wire_zone_m, .(wire_zone_cover = mean(h >= cover_min_m), wire_zone_max_h_m = max(h)), by = seg_id]
+  ul <- cdt[dh <= under_line_m & h >= cover_min_m,
+            .(min_clearance_lo_m = min(clear_lo), min_clearance_hi_m = min(clear_hi),
+              encroach_lo_m2 = sum(clear_lo < clearance_target_m) * cell_area,
+              encroach_hi_m2 = sum(clear_hi < clearance_target_m) * cell_area), by = seg_id]
+  cov <- seen[, .(frac_observed = if (any(dh <= coverage_m)) mean(observed[dh <= coverage_m]) else 0,
+                  frac_observed_under = if (any(dh <= under_line_m)) mean(observed[dh <= under_line_m]) else 0),
+              by = seg_id]
+  tdt <- data.table::as.data.table(sf::st_drop_geometry(trees))
+  ts <- if (nrow(tdt)) tdt[, .(n_strike_lo = sum(strike_lo), n_strike_hi = sum(strike_hi),
+                                n_strike_possible = sum(strike_possible), n_strike_certain = sum(strike_certain)),
+                            by = seg_id] else NULL
+  seg_stats <- data.table::data.table(seg_id = segments$seg_id)
+  fm <- frac_measured[as.character(seg_stats$seg_id)]
+  seg_stats[, frac_measured := ifelse(is.na(fm), 0, unname(fm))]
+  for (part in list(cov, wz, ul, ts)) {
+    if (!is.null(part)) seg_stats <- merge(seg_stats, part, by = "seg_id", all.x = TRUE)
   }
-  seg_stats <- lapply(segments$seg_id, function(s) {
-    cs <- cells[cells$seg_id == s, ]
-    wz <- cs[cs$dh <= wire_zone_m, ]
-    ul <- cs[cs$dh <= under_line_m & cs$h >= cover_min_m, ]
-    ts <- trees[trees$seg_id == s, ]
-    fm <- frac_measured[as.character(s)]
-    sn <- seen[[as.character(s)]]
-    data.frame(
-      seg_id             = s,
-      frac_measured      = if (is.na(fm)) 0 else unname(fm),
-      frac_observed      = coverage(sn, coverage_m),
-      frac_observed_under = coverage(sn, under_line_m),
-      wire_zone_cover    = if (nrow(wz)) mean(wz$h >= cover_min_m) else NA_real_,
-      wire_zone_max_h_m  = if (nrow(wz)) max(wz$h) else NA_real_,
-      min_clearance_lo_m = if (nrow(ul)) min(ul$clear_lo) else NA_real_,
-      min_clearance_hi_m = if (nrow(ul)) min(ul$clear_hi) else NA_real_,
-      encroach_lo_m2     = sum(ul$clear_lo < clearance_target_m) * cell_area,
-      encroach_hi_m2     = sum(ul$clear_hi < clearance_target_m) * cell_area,
-      n_strike_lo        = sum(ts$strike_lo),
-      n_strike_hi        = sum(ts$strike_hi),
-      n_strike_possible  = sum(ts$strike_possible),
-      n_strike_certain   = sum(ts$strike_certain)
-    )
-  })
-  out <- merge(segments, do.call(rbind, seg_stats), by = "seg_id")
+  for (col in c("frac_observed", "frac_observed_under", "encroach_lo_m2", "encroach_hi_m2",
+                "n_strike_lo", "n_strike_hi", "n_strike_possible", "n_strike_certain")) {
+    if (!col %in% names(seg_stats)) seg_stats[, (col) := 0]
+    seg_stats[is.na(get(col)), (col) := 0]
+  }
+  for (col in c("wire_zone_cover", "wire_zone_max_h_m", "min_clearance_lo_m", "min_clearance_hi_m")) {
+    if (!col %in% names(seg_stats)) seg_stats[, (col) := NA_real_]
+  }
+  seg_stats <- as.data.frame(seg_stats)[, c("seg_id", "frac_measured", "frac_observed", "frac_observed_under",
+                                            "wire_zone_cover", "wire_zone_max_h_m", "min_clearance_lo_m",
+                                            "min_clearance_hi_m", "encroach_lo_m2", "encroach_hi_m2",
+                                            "n_strike_lo", "n_strike_hi", "n_strike_possible", "n_strike_certain")]
+  out <- merge(segments, seg_stats, by = "seg_id")
+  attr(out, "n_cells_band") <- n_cells_band
   unseen <- out$frac_observed < min_observed | out$frac_observed_under < min_observed
   tier <- function(area, n) {
     t <- ifelse(area >= min_encroach_m2, "grow-in", ifelse(n > 0, "fall-in", "none"))
@@ -709,21 +755,34 @@ empty_trees <- function(crs) {
 # [z, z_hi]: reach is convex in conductor elevation and least where the
 # conductor is level with the tree's base, so clamping the base into the
 # bracket gives the smallest reach any plausible conductor allows (#49).
-min_reach <- function(xy, ground, z, profile, m, phase_offset_m, h, z_hi = NULL) {
+min_reach <- function(xy, ground, z, profile, m, phase_offset_m, h, z_hi = NULL,
+                      max_k = 400L, chunk = 20000L) {
   step <- stats::median(abs(diff(profile$s_m)), na.rm = TRUE)
   if (!is.finite(step) || step <= 0) step <- 1
-  k <- min(nrow(profile), ceiling(2 * (max(h, na.rm = TRUE) + phase_offset_m) / step) + 3L)
-  nn <- FNN::get.knnx(as.matrix(profile[, c("x", "y")]), xy, k = k)
-  dh <- pmax(nn$nn.dist * m - phase_offset_m, 0)
-  zl <- matrix(z[nn$nn.index], nrow = nrow(xy))
-  g <- matrix(ground, nrow = nrow(xy), ncol = ncol(zl))
-  zc <- if (is.null(z_hi)) zl else pmin(pmax(g, zl), matrix(z_hi[nn$nn.index], nrow = nrow(xy)))
-  dz <- zc - g
-  r <- sqrt(dh^2 + dz^2)
-  r[is.na(r)] <- Inf
-  i <- cbind(seq_len(nrow(xy)), max.col(-r, "first"))
-  list(reach = r[i], dz = dz[i])
+  # k vertices either side cover the tallest tree's reach; capped so the
+  # n_trees x k matrices stay bounded, and trees are taken in chunks (#55).
+  k <- min(nrow(profile), ceiling(2 * (max(h, na.rm = TRUE) + phase_offset_m) / step) + 3L, max_k)
+  verts <- as.matrix(profile[, c("x", "y")])
+  reach <- dz_out <- numeric(nrow(xy))
+  starts <- seq(1, nrow(xy), by = chunk)
+  for (s in starts) {
+    idx <- s:min(s + chunk - 1, nrow(xy))
+    nn <- FNN::get.knnx(verts, xy[idx, , drop = FALSE], k = k)
+    dh <- pmax(nn$nn.dist * m - phase_offset_m, 0)
+    zl <- matrix(z[nn$nn.index], nrow = length(idx))
+    g <- matrix(ground[idx], nrow = length(idx), ncol = ncol(zl))
+    zc <- if (is.null(z_hi)) zl else pmin(pmax(g, zl), matrix(z_hi[nn$nn.index], nrow = length(idx)))
+    dz <- zc - g
+    rr <- sqrt(dh^2 + dz^2)
+    rr[is.na(rr)] <- Inf
+    i <- cbind(seq_along(idx), max.col(-rr, "first"))
+    reach[idx] <- rr[i]
+    dz_out[idx] <- dz[i]
+  }
+  list(reach = reach, dz = dz_out)
 }
+
+res_of <- function(r) terra::res(r)[1]
 
 #' Line vertices as candidate structure locations
 #'

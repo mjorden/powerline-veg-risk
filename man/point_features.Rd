@@ -16,9 +16,15 @@ featurised (they are ground / low cover, handled by the ground class).}
 }
 \value{
 A \code{data.table} with \code{pid} (row index into \code{las@data}), \code{X}, \code{Y},
-\code{Z}, and feature columns. Attributes \code{crs} (the CRS of \code{las}), \code{k} and
-\code{features} (the predictor column names) travel with the table through
-\code{\link[=weak_labels]{weak_labels()}}, \code{\link[=assign_blocks]{assign_blocks()}} and \code{\link[=predict_points]{predict_points()}}.
+\code{Z} (height above ground, native units), \code{Zref} (the original
+elevation, native units, \code{NA} when the cloud was not height-normalised
+with lidR), \code{class_code} (the delivered ASPRS class), \code{gpstime} (\code{NA}
+when not read), and feature columns. The table is self-contained: the
+risk functions never index back into \code{las} by row. Attributes \code{crs}
+(the CRS of \code{las}), \code{k}, \code{features} (the predictor column names) and
+\code{las_fingerprint} (point count and extent of \code{las}, checked by
+\code{\link[=corridor_rasters]{corridor_rasters()}}) travel with the table through \code{\link[=weak_labels]{weak_labels()}},
+\code{\link[=assign_blocks]{assign_blocks()}} and \code{\link[=predict_points]{predict_points()}}.
 }
 \description{
 Compute per-point classification features

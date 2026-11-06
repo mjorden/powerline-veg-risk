@@ -317,12 +317,15 @@ canopy_dryness <- function(composite, rasters, profile, risk, zone_m = 6, corrid
   # ground points' convex hull, so it also fills the inside of every bend in
   # the line, and only distance from the line marks the corridor's edge.
   # Cells where conductor returns were removed are unknown too.
-  xy <- terra::crds(chm, na.rm = FALSE)
+  # Only cells the DTM covers are projected onto the line; with a corridor
+  # mask from corridor_rasters() that is the corridor, not its bounding box (#55).
+  idx <- terra::cells(rasters$dtm)
+  xy <- terra::xyFromCell(chm, idx)
   pr <- line_project(xy, profile, m)
-  if (is.null(corridor_m)) corridor_m <- max(pr$dist_m[!is.na(terra::values(chm)[, 1])])
+  if (is.null(corridor_m)) corridor_m <- max(pr$dist_m[!is.na(chm[idx][, 1])])
   canopy <- terra::ifel(is.na(chm), 0, chm >= cover_min_m)
   canopy <- terra::mask(canopy, rasters$dtm)
-  canopy[pr$dist_m > corridor_m] <- NA
+  canopy[idx[pr$dist_m > corridor_m]] <- NA
   if (!is.null(rasters$unobserved)) canopy <- terra::mask(canopy, rasters$unobserved, maskvalues = TRUE)
   # Coverage is judged before the structure mask: a tower pad is observed
   # ground, not a data gap, even though it is neither canopy nor bare.
@@ -355,7 +358,7 @@ canopy_dryness <- function(composite, rasters, profile, risk, zone_m = 6, corrid
   n_excluded <- vapply(gates, function(g) sum(!g), 0L)
 
   # Grown-in canopy cells (1 m), tagged with their segment and Landsat pixel.
-  v <- terra::values(canopy)[, 1]
+  v <- canopy[idx][, 1]
   grown <- which(!is.na(v) & v == 1 & pr$dist_m <= zone_m)
   cc <- data.frame(seg_id = profile$seg_id[pr$vertex[grown]],
                    cell = terra::cellFromXY(ls, xy[grown, , drop = FALSE]))

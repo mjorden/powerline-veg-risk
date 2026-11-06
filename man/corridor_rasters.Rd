@@ -15,7 +15,8 @@ corridor_rasters(
   gap_m = 1.5,
   drop = NULL,
   void_m = 5,
-  linearity = NULL
+  linearity = NULL,
+  corridor = NULL
 )
 }
 \arguments{
@@ -51,6 +52,11 @@ that ordinary point spacing never empties it (3DEP QL2 is >= 2 pts/m^2).}
 test. By default the smallest neighbourhood \code{\link[=point_features]{point_features()}} recorded
 on \code{pred} (\code{linearity_k10} for the default \code{k}); an absent column is an
 error, never silently "not linear".}
+
+\item{corridor}{Optional polygon (\code{sf}/\code{sfc}, any CRS) to crop and mask
+every raster to. The LAS bounding box of a long diagonal corridor is
+mostly empty; masking keeps every later cell table proportional to the
+corridor rather than to its bounding box (#55).}
 }
 \value{
 A list with \code{dtm} (ground elevation) and \code{chm} (canopy height),
