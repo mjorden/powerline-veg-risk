@@ -133,7 +133,9 @@ tile_complete <- function(path, size_bytes = NA) {
 #'   `cable` is deliberately left out. Ignored when `ids` is given.
 #' @param overpass_url Overpass endpoint.
 #' @return An `sf` LINESTRING data frame (EPSG:4326) with `osm_id`, `name`,
-#'   `power`, `voltage_kv`, `operator`. Attributes `osm_timestamp` (the
+#'   `power`, `voltage_kv`, `operator`, `ref`, `circuits`, `cables`,
+#'   `wires` and `tags` (every tag of the way as a JSON string, so nothing
+#'   needed later for conflation is lost at fetch). Attributes `osm_timestamp` (the
 #'   OSM data snapshot the answer came from) and `osm_query` record the
 #'   provenance; [osm_power_structures()] and [osm_buildings()] carry the
 #'   same two.
@@ -162,6 +164,11 @@ osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_lin
     power      = vapply(els, tag, "", "power"),
     voltage_kv = volt,
     operator   = vapply(els, tag, "", "operator"),
+    ref        = vapply(els, tag, "", "ref"),
+    circuits   = vapply(els, tag, "", "circuits"),
+    cables     = vapply(els, tag, "", "cables"),
+    wires      = vapply(els, tag, "", "wires"),
+    tags       = vapply(els, function(e) as.character(jsonlite::toJSON(e$tags %||% list(), auto_unbox = TRUE)), ""),
     geometry   = sf::st_sfc(lapply(els, function(e) {
       sf::st_linestring(do.call(rbind, lapply(e$geometry, function(p) c(p$lon, p$lat))))
     }), crs = 4326)
@@ -172,7 +179,9 @@ osm_power_lines <- function(aoi = NULL, ids = NULL, power = c("line", "minor_lin
 #' Fetch power-line support structures (poles, towers) from OpenStreetMap
 #'
 #' @inheritParams osm_power_lines
-#' @return An `sf` POINT data frame (EPSG:4326) with `osm_id` and `type`;
+#' @return An `sf` POINT data frame (EPSG:4326) with `osm_id`, `type`,
+#'   `ref` (the utility's structure number, when mapped) and `tags` (every
+#'   tag as a JSON string);
 #'   zero rows when the area has none (sf gives an empty geometry column
 #'   the class `sfc_GEOMETRY`, so test `nrow()`, not the class).
 #' @export
@@ -182,11 +191,14 @@ osm_power_structures <- function(aoi, overpass_url = "https://overpass-api.de/ap
     '[out:json][timeout:90];(node["power"="tower"](%s);node["power"="pole"](%s););out;', bb, bb
   ), overpass_url)
   out <- if (length(els) == 0) {
-    sf::st_sf(osm_id = character(), type = character(), geometry = empty_sfc("POINT"))
+    sf::st_sf(osm_id = character(), type = character(), ref = character(), tags = character(),
+              geometry = empty_sfc("POINT"))
   } else {
     sf::st_sf(
       osm_id   = vapply(els, function(e) as.character(e$id), ""),
       type     = vapply(els, function(e) e$tags$power %||% NA_character_, ""),
+      ref      = vapply(els, function(e) e$tags$ref %||% NA_character_, ""),
+      tags     = vapply(els, function(e) as.character(jsonlite::toJSON(e$tags %||% list(), auto_unbox = TRUE)), ""),
       geometry = sf::st_sfc(lapply(els, function(e) sf::st_point(c(e$lon, e$lat))), crs = 4326)
     )
   }

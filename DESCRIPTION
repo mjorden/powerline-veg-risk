@@ -23,6 +23,7 @@ Imports:
     data.table,
     FNN,
     httr2,
+    jsonlite,
     lidR (>= 4.0.0),
     lwgeom,
     ranger,

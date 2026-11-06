@@ -20,9 +20,15 @@
 #' @param min_height_m Points below this height above ground are not
 #'   featurised (they are ground / low cover, handled by the ground class).
 #' @return A `data.table` with `pid` (row index into `las@data`), `X`, `Y`,
-#'   `Z`, and feature columns. Attributes `crs` (the CRS of `las`), `k` and
-#'   `features` (the predictor column names) travel with the table through
-#'   [weak_labels()], [assign_blocks()] and [predict_points()].
+#'   `Z` (height above ground, native units), `Zref` (the original
+#'   elevation, native units, `NA` when the cloud was not height-normalised
+#'   with lidR), `class_code` (the delivered ASPRS class), `gpstime` (`NA`
+#'   when not read), and feature columns. The table is self-contained: the
+#'   risk functions never index back into `las` by row. Attributes `crs`
+#'   (the CRS of `las`), `k`, `features` (the predictor column names) and
+#'   `las_fingerprint` (point count and extent of `las`, checked by
+#'   [corridor_rasters()]) travel with the table through [weak_labels()],
+#'   [assign_blocks()] and [predict_points()].
 #' @export
 point_features <- function(las, k = c(10L, 30L), min_height_m = 2) {
   m <- las_m_per_unit(las)
@@ -35,6 +41,9 @@ point_features <- function(las, k = c(10L, 30L), min_height_m = 2) {
     X          = sub$X,
     Y          = sub$Y,
     Z          = sub$Z,
+    Zref       = if ("Zref" %in% names(sub@data)) sub$Zref else NA_real_,
+    class_code = as.integer(sub$Classification),
+    gpstime    = if ("gpstime" %in% names(sub@data)) sub$gpstime else NA_real_,
     height_m   = sub$Z * m,
     intensity  = rank_scale(sub$Intensity),
     n_returns  = sub$NumberOfReturns,
@@ -59,14 +68,36 @@ point_features <- function(las, k = c(10L, 30L), min_height_m = 2) {
   attr(out, "crs") <- sf::st_crs(las)
   attr(out, "k") <- as.integer(k)
   attr(out, "features") <- setdiff(names(out), point_id_columns)
+  attr(out, "las_fingerprint") <- las_fingerprint(las)
   out
+}
+
+# Cheap identity of a point cloud: count and extent. Enough to catch the
+# cloud being re-clipped, re-sorted or swapped between featurising and
+# rasterising (#55).
+las_fingerprint <- function(las) {
+  list(n = lidR::npoints(las), xmin = min(las$X), xmax = max(las$X), ymin = min(las$Y), ymax = max(las$Y))
+}
+
+# Abort when `feat` was not featurised from this `las`.
+check_las_match <- function(las, feat, arg = "pred") {
+  fp <- attr(feat, "las_fingerprint")
+  if (is.null(fp)) return(invisible(TRUE))
+  now <- las_fingerprint(las)
+  if (!isTRUE(all.equal(fp, now, tolerance = 1e-9))) {
+    rlang::abort(sprintf(paste("`%s` was featurised from a different point cloud than `las`",
+                               "(%s points, extent %s) vs (%s points, extent %s).", "Pass the LAS that point_features() saw."),
+                         arg, fp$n, paste(round(unlist(fp[-1]), 2), collapse = " "),
+                         now$n, paste(round(unlist(now[-1]), 2), collapse = " ")))
+  }
+  invisible(TRUE)
 }
 
 # Intensity is uncalibrated in 3DEP deliveries, so use its within-dataset
 # percentile rather than raw counts.
 rank_scale <- function(x) (rank(x, ties.method = "average") - 0.5) / length(x)
 
-point_id_columns <- c("pid", "X", "Y", "Z")
+point_id_columns <- c("pid", "X", "Y", "Z", "Zref", "class_code", "gpstime")
 
 # Predictor columns. Tables from point_features() carry an allow-list; a
 # table assembled by hand falls back to everything that is not an id, a

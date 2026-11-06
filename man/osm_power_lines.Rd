@@ -26,7 +26,9 @@ would otherwise be taught to the classifier as vegetation. Underground
 }
 \value{
 An \code{sf} LINESTRING data frame (EPSG:4326) with \code{osm_id}, \code{name},
-\code{power}, \code{voltage_kv}, \code{operator}. Attributes \code{osm_timestamp} (the
+\code{power}, \code{voltage_kv}, \code{operator}, \code{ref}, \code{circuits}, \code{cables},
+\code{wires} and \code{tags} (every tag of the way as a JSON string, so nothing
+needed later for conflation is lost at fetch). Attributes \code{osm_timestamp} (the
 OSM data snapshot the answer came from) and \code{osm_query} record the
 provenance; \code{\link[=osm_power_structures]{osm_power_structures()}} and \code{\link[=osm_buildings]{osm_buildings()}} carry the
 same two.
