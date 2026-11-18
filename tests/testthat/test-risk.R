@@ -563,8 +563,10 @@ test_that("a disputed crown top makes its cell unobserved, not observed at its l
   top <- data.frame(X = x0 + 30 + runif(60, -0.4, 0.4), Y = y0 + runif(60, -0.4, 0.4), Z = runif(60, 9, 10))
   # A second crown whose disputed returns sit inside its own canopy surface.
   other <- data.frame(X = x0 + 45 + runif(300, -1.5, 1.5), Y = y0 + runif(300, -1.5, 1.5), Z = runif(300, 2, 6))
-  las <- make_las(rbind(low, top, other))
-  pred <- pred_for(las, function(x, y, z) "vegetation")
+  # A third, left unlabelled (a label margin): unobserved for the old reason.
+  margin <- data.frame(X = x0 + 10 + runif(60, -0.2, 0.2), Y = y0 + 5.5 + runif(60, -0.2, 0.2), Z = runif(60, 2, 7))
+  las <- make_las(rbind(low, top, other, margin), hole_x = c(52, 58))
+  pred <- pred_for(las, function(x, y, z) ifelse(abs(x - x0 - 10) < 0.5 & abs(y - y0 - 5.5) < 0.5, NA, "vegetation"))
   pred[height_m > 8, pred := factor("wire", levels = label_levels)]
   pred[X > x0 + 44.6 & X < x0 + 45.4 & height_m > 4 & height_m < 5, pred := factor("wire", levels = label_levels)]
 
@@ -573,6 +575,13 @@ test_that("a disputed crown top makes its cell unobserved, not observed at its l
   expect_true(is.na(terra::extract(r$chm, at_top)[, 1]))
   expect_true(terra::extract(r$unobserved, at_top)[, 1] == 1)
   expect_gt(r$n_overtopped_cells, 0)
+  # The other reasons a cell is unobserved still hold with disputed points
+  # about: an unlabelled crown and a void stay flagged, and no cell of the
+  # flag is NA (an NA would read as observed downstream).
+  expect_true(terra::extract(r$unobserved, cbind(x0 + 10.25, y0 + 5.75))[, 1] == 1)
+  expect_true(terra::extract(r$unobserved, cbind(x0 + 55.25, y0 + 0.25))[, 1] == 1)
+  expect_false(anyNA(terra::values(r$unobserved)))
+  expect_false(anyNA(terra::values(corridor_rasters(las, pred, top_tol_m = Inf)$unobserved)))
   # The crown's flank, where no disputed point stands, is still canopy.
   expect_gt(terra::extract(r$chm, cbind(x0 + 31.25, y0 + 1.25))[, 1], 2)
   # A disputed point inside the canopy surface changes nothing.

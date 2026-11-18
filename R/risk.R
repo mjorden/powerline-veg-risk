@@ -271,7 +271,10 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
   if (any(disputed)) {
     top <- terra::rasterize(as.matrix(pred[which(disputed), c("X", "Y")]), dtm,
                             values = zrel[disputed], fun = "max")
-    overtopped <- !is.na(top) & !is.na(chm) & top > chm + top_tol_m / m
+    # ifel(), not `&`: terra's logical operators give NA where an operand
+    # is NA, and an NA here would spread through `|` into `unobserved` and
+    # un-flag every cell that holds no disputed point.
+    overtopped <- terra::ifel(is.na(top) | is.na(chm), 0, top > chm + top_tol_m / m) == 1
     chm <- terra::mask(chm, overtopped, maskvalues = TRUE)
   }
   n_overtopped <- sum(terra::values(overtopped), na.rm = TRUE)
