@@ -1,0 +1,6 @@
+# Cached inputs are checked against the checksum in their sidecar (R/cache.R).
+# Line-ending conversion on checkout changes their bytes, the check fails, and
+# the pipeline refetches layers it already has (seen on Windows with
+# core.autocrlf = true).
+data-raw/**/*.geojson -text
+data-raw/**/*.json -text

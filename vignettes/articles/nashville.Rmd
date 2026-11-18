@@ -36,7 +36,7 @@ The OSM way has 131 vertices, 8 of them coincident with tagged towers, so the 2 
 | S1229702334 > S1229702692 | 152 m | 3 | fall-in | 1 |
 | S1229702692 > S1230197138 | 175 m | 3 | none | 0 |
 
-Five of the 39 stations and one of the 24 strike trees fall outside the tagged towers' reach and belong to no span. The other 123 vertices of the way are bends and crossings a mapper added; they no longer act as supports for the upper bound, which here is moot because the conductor is measured end to end.
+Five of the 39 stations and one of the 24 strike trees fall outside the tagged towers' reach and belong to no span. The other 123 vertices of the way are bends and crossings a mapper added; they no longer act as supports for the upper bound, nor are their surroundings masked, which here is moot because the conductor is measured end to end.
 
 ## Wires transfer across space here; the Colorado model does not
 
@@ -44,25 +44,25 @@ Five of the 39 stations and one of the 24 strike trees fall outside the tagged t
 
 | class | n | prevalence | avg. precision, spatial blocks | random folds | spatial, no height/echo |
 |---|---:|---:|---:|---:|---:|
-| wire | 104,181 | 0.10 | **0.91** | 0.94 | 0.86 |
-| structure | 4,262 | 0.004 | 0.008 | 0.26 | 0.006 |
+| wire | 104,181 | 0.11 | **0.92** | 0.95 | 0.87 |
+| structure | 4,262 | 0.004 | 0.048 | 0.29 | 0.044 |
 
 ![Nashville cross-validation](../reference/figures/nashville_cv_metrics.png)
 
-Wires transfer across space here: average precision 0.91 against a no-skill 0.10, and 0.86 even without the height and echo features, the most direct proxies for the labelling rule. Structures (31 lattice towers) still don't.
+Wires transfer across space here: average precision 0.92 against a no-skill 0.11, and 0.87 even without the height and echo features, the most direct proxies for the labelling rule. All five folds agree (0.85 to 0.96); blocks are dealt to folds by class presence, so each fold holds about 20,800 wire points. Structures (31 lattice towers) still don't transfer: 0.048 pooled, 0.006 to 0.15 by fold. That is six times the 0.008 of earlier runs, in which tower steel more than 3 m from a tower's node was labelled vegetation; it now abstains out to the 18 m tower mask.
 
-**Against the vendor's classes.** These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can't show skill: predicting "vegetation" everywhere scores 0.992.
+**Against the vendor's classes.** These are independent of the weak labels. A geometric conductor zone (inside the measured conductor envelope, within 3 m of the conductor or above) is excluded from scoring for every method alike, because the vendor put conductors in vegetation. Vegetation is 98.5% of the scored points, so its F1 can't show skill: predicting "vegetation" everywhere scores 0.992. The weak-label model is scored out of fold: each point is classified by the spatial-block model that never saw its block, as the reference in the last row is. Scored on its own training points, as earlier versions of this table did, it reads 0.957 with the same balanced accuracy.
 
 | | vegetation F1 | building F1 | balanced accuracy | Cohen's κ |
 |---|---:|---:|---:|---:|
 | always "vegetation" (baseline) | 0.992 | 0 | 0.50 | 0 |
-| weak labels | 0.950 | 0 | 0.46 | 0.07 |
-| model trained on weak labels | 0.957 | 0 | 0.47 | −0.01 |
+| weak labels | 0.932 | 0 | 0.44 | 0.05 |
+| model trained on weak labels (out of fold) | 0.958 | 0 | 0.47 | −0.01 |
 | Colorado model, transferred | 0.992 | 0 | 0.50 | 0.00 |
-| **trained on vendor labels (spatial CV)** | 0.998 | **0.87** (AP 0.95) | 0.89 | — |
+| **trained on vendor labels (spatial CV)** | 0.998 | **0.87** (AP 0.94) | 0.88 | — |
 
 - **On vegetation vs building, the weak-label pipeline has no skill at this site.** OSM maps one building in the corridor, so there are no building labels to learn from. The vendor's labels would buy a building F1 of 0.87. The weak models' lower vegetation recall is mostly second-circuit conductors and abstentions, which the vendor also calls vegetation.
-- **The Colorado model doesn't transfer.** With its own class prior it recalls 0% of Nashville's conductor returns. Threshold-free, its wire average precision is 0.20 against a 0.10 baseline (the Nashville model: 0.86). Its 0.992 vegetation F1 is exactly the baseline.
+- **The Colorado model doesn't transfer.** With its own class prior it recalls 0% of Nashville's conductor returns. Threshold-free, its wire average precision is 0.19 against a 0.10 baseline (the Nashville model: 0.81 out of fold, 0.86 on its own training points). Its 0.992 vegetation F1 is exactly the baseline.
 
 ## Vendor vegetation classes contain the conductors
 
@@ -71,12 +71,12 @@ Wires transfer across space here: average precision 0.91 against a no-skill 0.10
 | canopy model | grow-in | fall-in | clear |
 |---|---:|---:|---:|
 | vendor vegetation classes, as delivered | 39 | 0 | 0 |
-| vendor vegetation + this package's conductor removal | 0 | 10 | 29 |
+| vendor vegetation + this package's conductor removal | 1 | 10 | 28 |
 | **this package** (consensus vegetation + conductor removal) | **0** | **7** | **32** |
 
-- **The delivered classes would send crews to every span.** Removing conductor returns is the whole grow-in correction (39 → 0). Consensus labelling (model and weak rules agreeing on vegetation, vendor buildings removed) then trims fall-in from 10 segments to 7.
+- **The delivered classes would send crews to every span.** Removing conductor returns is nearly the whole grow-in correction (39 → 1). Consensus labelling (model and weak rules agreeing on vegetation, vendor buildings removed) removes the last one and trims fall-in from 10 segments to 7.
 - **No grow-in.** The managed right-of-way is clear under the conductors.
-- **The 32 clear segments were seen, not assumed.** Every segment has at least 91% of its corridor and of its grow-in zone observed (median 99%), so none is tiered `no data`. The lowest segment (0.36–0.41 km, 91% under the line) is still 16 points above the 75% threshold.
+- **The 32 clear segments were seen, not assumed.** Every segment has at least 91% of its corridor and of its grow-in zone observed (median 99%), so none is tiered `no data`. The lowest segment (0.41–0.46 km, 91% under the line) is still 16 points above the 75% threshold. 680 cells count as unobserved because a return the rules call vegetation and the classifier calls something else stands above the canopy left in the cell. What the tower masks hide is reported as well: at three stations an 18 m mask covers half of the grow-in zone (50–51%), and the other half was seen and scored.
 - **24 strike trees across 7 segments,** 28–39 m from the centreline, the same under both bounds because the conductor is measured. They are the list to verify.
 - **The conductor envelope has to cover every phase.** An earlier run capped it at 15 m while one outer phase sits up to ~19 m from the OSM centreline. That left outer-phase returns in the canopy model, which showed up as 2 grow-in segments and 4 extra strike trees at the envelope edge. Widening the grow-in zone to 21 m removed all of them.
 

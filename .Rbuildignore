@@ -12,3 +12,4 @@
 ^rfcs$
 ^vignettes/articles$
 ^\.claude$
+^\.gitattributes$
