@@ -156,20 +156,28 @@ segment_lines <- function(lines, crs, seg_m = 50, ways = NULL) {
 #'   must stand this far above the cell's remaining canopy for the cell to
 #'   become unobserved. Within a crown the highest return of a cell and the
 #'   next one down differ by less than this.
+#' @param column_m Depth below a cell's canopy top searched for a lower
+#'   vegetation return when deciding whether the cell has a canopy column
+#'   (see `column` under Value).
 #' @param corridor Optional polygon (`sf`/`sfc`, any CRS) to crop and mask
 #'   every raster to. The LAS bounding box of a long diagonal corridor is
 #'   mostly empty; masking keeps every later cell table proportional to the
 #'   corridor rather than to its bounding box (#55).
 #' @return A list with `dtm` (ground elevation) and `chm` (canopy height),
 #'   both `SpatRaster` in metres, `unobserved` (logical `SpatRaster`), `void`
-#'   (logical `SpatRaster`, the voids alone), `n_conductor_excluded`,
+#'   (logical `SpatRaster`, the voids alone), `column` (logical
+#'   `SpatRaster`: the cell's 3 x 3 window holds a consensus vegetation
+#'   return between 1 m and `column_m` below the cell's canopy top, so the
+#'   top is the top of a crown and not a return hanging in the air; used by
+#'   the crown-support filter of [assess_risk()]), `n_conductor_excluded`,
 #'   `n_uncertain_excluded` (points left out of the canopy model as uncertain,
 #'   conductor exclusions included) and `n_overtopped_cells` (cells made
 #'   unobserved because a disputed point stood above their canopy).
 #' @export
 corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 15,
                              below_m = 1, min_linearity = 0.6, gap_m = 1.5, drop = NULL,
-                             void_m = 5, linearity = NULL, corridor = NULL, top_tol_m = 1) {
+                             void_m = 5, linearity = NULL, corridor = NULL, top_tol_m = 1,
+                             column_m = 4) {
   pred <- as_point_table(pred, "pred")
   check_las_match(las, pred)
   m <- las_m_per_unit(las)
@@ -268,14 +276,67 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
   }
   n_overtopped <- sum(terra::values(overtopped), na.rm = TRUE)
   unobserved <- (excluded & is.na(chm)) | overtopped | void
+  column <- canopy_column(chm, cbind(pred$X[consensus], pred$Y[consensus]), zrel[consensus],
+                          depth = column_m / m, skip = 1 / m)
   # Z is assumed to share the horizontal unit (true for both case studies).
-  out <- list(dtm = dtm * m, chm = chm * m, unobserved = unobserved, void = void)
+  out <- list(dtm = dtm * m, chm = chm * m, unobserved = unobserved, void = void, column = column)
   if (!is.null(corridor)) {
     poly <- terra::vect(sf::st_transform(sf::st_geometry(corridor), crs))
     out <- lapply(out, function(x) terra::mask(terra::crop(x, poly, snap = "out"), poly))
   }
   c(out, list(n_conductor_excluded = length(hit_rows), n_uncertain_excluded = sum(uncertain),
               n_overtopped_cells = n_overtopped))
+}
+
+# Does a canopy cell stand on a canopy column? TRUE where the cell's 3 x 3
+# window holds a vegetation return between `skip` and `depth` below the
+# cell's canopy top (all in the raster's own units). A crown has returns
+# down its flanks and through its interior; a stray conductor return, a
+# bird or a pole top has air beneath it. Heights are quantised to a quarter
+# of `skip` so the window join is over occupied (cell, height) pairs, not
+# points.
+canopy_column <- function(chm, xy, z, depth, skip) {
+  out <- terra::ifel(is.na(chm), NA, 0)
+  top_cells <- terra::cells(chm)
+  if (length(top_cells) == 0 || nrow(xy) == 0) return(out == 1)
+  q <- skip / 4
+  cell <- terra::cellFromXY(chm, xy)
+  ok <- !is.na(cell)
+  occ <- unique(data.table::data.table(cell = cell[ok], h = round(z[ok] / q) * q))
+  rc <- terra::rowColFromCell(chm, occ$cell)
+  occ[, `:=`(cell_row = rc[, 1], cell_col = rc[, 2])]
+  trc <- terra::rowColFromCell(chm, top_cells)
+  tops <- data.table::data.table(cell = top_cells, cell_row = trc[, 1], cell_col = trc[, 2],
+                                 cell_top = terra::extract(chm, top_cells)[, 1])
+  has <- integer()
+  for (i in -1:1) for (j in -1:1) {
+    nb <- occ[, .(cell_row = cell_row + i, cell_col = cell_col + j, h)]
+    found <- nb[tops, on = c("cell_row", "cell_col"), nomatch = NULL, allow.cartesian = TRUE]
+    has <- union(has, found[h <= cell_top - skip & h >= cell_top - depth, unique(cell)])
+  }
+  if (length(has)) out[has] <- 1
+  out == 1
+}
+
+# Crown-support filter shared by assess_risk() and canopy_dryness(). A cell
+# keeps its canopy if at least `min_support` cells of its 3 x 3 window are
+# canopy, or if it stands on a canopy column (`column`, from
+# corridor_rasters()). Support is counted on a pit-filled cover: a
+# non-canopy cell with at least `pit_min` of its 8 neighbours canopy counts
+# towards its neighbours' support, so a sparse or leaf-off crown is not
+# eroded from the inside. Cells that fail are set to 0; NA stays NA.
+crown_support <- function(chm, cover_min_m, min_support, column = NULL, pit_min = 5) {
+  cover <- terra::ifel(is.na(chm), 0, chm >= cover_min_m)
+  n <- terra::focal(cover, w = 3, fun = "sum", na.rm = TRUE)
+  pit <- cover == 0 & !is.na(chm) & n >= pit_min
+  support <- terra::focal(cover == 1 | pit, w = 3, fun = "sum", na.rm = TRUE)
+  keep <- support >= min_support
+  if (!is.null(column) && terra::compareGeom(column, chm, stopOnError = FALSE)) {
+    keep <- keep | terra::ifel(is.na(column), 0, column) == 1
+  }
+  # Masked cells next to observed ones get a finite support count; they
+  # stay NA so the filter cannot turn them into bare ground.
+  terra::ifel(is.na(chm), NA, terra::ifel(keep, chm, 0))
 }
 
 # A per-point column from the features table, or from `las` by row index
@@ -296,9 +357,10 @@ point_column <- function(pred, las, col) {
 #' within `structure_mask_m` of a support are ignored (guy wires, crossarms
 #' and insulators there are elevated and linear too). Each `bin_m` chainage
 #' bin takes a low quantile (`q`) of return elevations; bins below the lower
-#' bound (physically non-compliant, so an artefact) or implying a slope
-#' steeper than `max_slope` to both neighbours are rejected. Surviving bins
-#' are interpolated across gaps of at most `max_gap_m` (`src = "measured"`).
+#' bound (physically non-compliant, so an artefact), or with no neighbouring
+#' bin within `max_gap_m` at a slope of `max_slope` or less, are rejected.
+#' Surviving bins are interpolated across gaps of at most `max_gap_m`
+#' (`src = "measured"`).
 #' Elsewhere the conductor is bracketed (`src = "bounded"`):
 #'
 #' * lower bound: ground + `min_ground_clear_m`. NESC Table 232-1 vertical
@@ -330,14 +392,18 @@ point_column <- function(pred, las, col) {
 #'   and the quantile of return elevations used per bin.
 #' @param max_slope Maximum plausible conductor slope (rise / run) between
 #'   adjacent measured bins.
-#' @param max_gap_m Largest gap between measured bins that is interpolated.
+#' @param max_gap_m Largest gap between measured bins that is interpolated;
+#'   also the farthest a neighbouring bin may be to vouch for a bin in the
+#'   slope check.
 #' @param min_ground_clear_m,attach_m,max_span_m Bounds parameters, metres.
 #' @return data.frame of vertices: `line_id`, `x`, `y`, `tx`, `ty` (unit
 #'   tangent along the line), `s_m`, `seg_id`, `ground`, `z_lo`, `z_hi`,
 #'   `src`. The attribute `bins` is a data frame with one row per line
 #'   counting the chainage bins that held conductor returns (`n_bins`) and
 #'   how many each sanity check rejected (`n_too_few`, `n_below_floor`,
-#'   `n_implausible`), with `n_measured` the bins that survived and
+#'   `n_implausible`: slope, or no neighbour within `max_gap_m`), with
+#'   `n_measured` the bins that survived, every one of which the
+#'   interpolation uses, and
 #'   `n_above_upper_bound` the measured bins that sit above the support
 #'   chord (kept, but a sign that the support set or `attach_m` is wrong),
 #'   so a profile that silently lost most of its returns can be told from
@@ -414,7 +480,7 @@ conductor_profile <- function(pred, segments, dtm, supports = NULL, step_m = 1,
         floor_z <- stats::approx(v$s_m[i], v$z_lo[i], xout = b$s_m, rule = 2)$y
         above <- b[b$z >= floor_z, ]
         bin_log$n_below_floor[k] <- nrow(b) - nrow(above)
-        b <- plausible_bins(above, max_slope)
+        b <- plausible_bins(above, max_slope, max_gap_m)
         bin_log$n_implausible[k] <- nrow(above) - nrow(b)
         bin_log$n_measured[k] <- nrow(b)
         if (nrow(b) == 0) next
@@ -452,12 +518,16 @@ support_chord <- function(s, sup) {
   out
 }
 
-# Keep measured bins with at least one neighbour within `max_slope` (drops
-# isolated bins and spikes or ramps a conductor cannot make).
-plausible_bins <- function(b, max_slope) {
+# Keep measured bins with at least one neighbour within `max_slope` and no
+# farther than `max_gap` along the line (drops isolated bins and spikes or
+# ramps a conductor cannot make). Without the distance limit a lone bin was
+# vouched for by the next surviving bin however far away, counted as
+# measured, and then dropped by the interpolation (#65).
+plausible_bins <- function(b, max_slope, max_gap = Inf) {
   b <- b[order(b$s_m), ]
   if (nrow(b) < 2) return(b[0, ])
   sl <- abs(diff(b$z) / diff(b$s_m))
+  sl[diff(b$s_m) > max_gap] <- Inf
   left <- c(Inf, sl)
   right <- c(sl, Inf)
   b[pmin(left, right) <= max_slope, ]
@@ -540,10 +610,19 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   their share is reported as `frac_masked` / `frac_masked_under`, because
 #'   nothing was scored there either.
 #' @param min_support A CHM cell counts as canopy only if at least this many
-#'   cells of its 3 x 3 window are >= `cover_min_m`. Removes 1-2 cell features
-#'   (unmapped single poles, stray conductor returns classified as vegetation)
-#'   that would otherwise appear as trees directly under the line. It also
-#'   trims crown edges slightly.
+#'   cells of its 3 x 3 window are >= `cover_min_m`, or if it stands on a
+#'   canopy column (`rasters$column`, see [corridor_rasters()]). Removes
+#'   isolated returns with air beneath them - stray conductor returns
+#'   classified as vegetation, pole tops - that would otherwise appear as
+#'   trees directly under the line. What it does not do: a strip two cells
+#'   wide passes the count away from its ends (an interior cell has 2 x 3 = 6
+#'   supporting cells), so a pole line or a two-cell ribbon of conductor
+#'   returns survives unless it has no column and is one cell wide. Support
+#'   is counted on a pit-filled cover, so a sparse crown is not eroded from
+#'   the inside, and a narrow crown with returns down its flanks is kept
+#'   whole by the column test (#65). With rasters that carry no `column`
+#'   (hand-built ones), only the count applies and crowns under about 3 m
+#'   across lose their edge cells.
 #' @param min_encroach_m2 Canopy area inside the clearance envelope needed to
 #'   call a segment grow-in (guards against single-cell artefacts).
 #' @param coverage_m Half-width of the band over which LiDAR coverage is
@@ -633,10 +712,7 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     # NA, not 0: masked cells are unobserved, not bare ground.
     chm <- terra::mask(chm, terra::vect(mask), inverse = TRUE, updatevalue = NA)
   }
-  support <- terra::focal(chm >= cover_min_m, w = 3, fun = "sum", na.rm = TRUE)
-  # na.rm gives masked cells next to observed ones a finite support count;
-  # keep them NA so the filter can't turn them into bare ground.
-  chm <- terra::ifel(is.na(chm), NA, terra::ifel(support >= min_support, chm, 0))
+  chm <- crown_support(chm, cover_min_m, min_support, rasters$column)
 
   s_end <- tapply(profile$s_m, profile$line_id, max)
   near <- function(xy) {

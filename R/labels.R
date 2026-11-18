@@ -6,7 +6,8 @@
 #
 #   building   - inside an OSM building footprint (shrunk inward so that
 #                overhanging tree crowns at the eaves are not labelled roof)
-#   structure  - within a small radius of an OSM pole/tower node
+#   structure  - within a small radius of an OSM pole/tower node; points
+#                farther out, up to the structure's full footprint, abstain
 #   wire       - near a mapped line, elevated, with an "air gap" beneath it
 #                across a 3 x 3 cell window, and part of a run of such cells
 #                that extends along the line within one conductor row (so
@@ -53,7 +54,14 @@
 #'   has at least `min_run` cells, spans at least `min_extent_m` along the
 #'   line, and occupies at least `min_occupancy` of the 1 m chainage bins
 #'   across that span. All members of a qualifying row are wire.
-#' @param structure_radius_m Radius around pole/tower nodes.
+#' @param structure_radius_m Radius around pole/tower nodes labelled
+#'   structure.
+#' @param structure_abstain_m Points between `structure_radius_m` and this
+#'   distance of a node are left unlabelled. Set it to the structure's
+#'   footprint radius (the `structure_mask_m` used by [assess_risk()]): a
+#'   lattice tower is far wider than the 3 m label radius, and its steel
+#'   beyond that radius would otherwise be taught as vegetation (#65).
+#'   Defaults to `structure_radius_m + margin_m`.
 #' @param building_shrink_m Inward buffer applied to building footprints.
 #' @param margin_m Width of the unlabelled margin around non-vegetation labels.
 #' @return `feat` with a factor column `label` (levels vegetation, wire,
@@ -65,7 +73,7 @@ weak_labels <- function(feat, crs = NULL, lines, structures = NULL, buildings = 
                         run_half_m = 10, min_run = 6, min_extent_m = 12,
                         row_m = 1.5, min_occupancy = 0.4,
                         structure_radius_m = 3, building_shrink_m = 1,
-                        margin_m = 2) {
+                        margin_m = 2, structure_abstain_m = NULL) {
   feat <- data.table::copy(as_point_table(feat))
   crs <- feat_crs(feat, crs)
   m <- crs_m_per_unit(crs)
@@ -89,7 +97,10 @@ weak_labels <- function(feat, crs = NULL, lines, structures = NULL, buildings = 
     cand[, `:=`(near = logical(), wire = logical())]
   }
   key <- feat[, paste(floor(X / cs), floor(Y / cs))]
-  is_wire <- key %in% cand[wire == TRUE, paste(cx, cy)]
+  # A wire cell's label belongs to its suspended layer. Points below the
+  # air-gap floor in the same cell (grass, a fence) were never part of the
+  # test; they fall into the margin below and abstain (#65).
+  is_wire <- key %in% cand[wire == TRUE, paste(cx, cy)] & feat$height_m >= gap_floor_m
   # Suspended candidates that are not wire abstain rather than becoming
   # vegetation: near the line they may be conductors the run test missed;
   # beyond wire_search_m they may belong to a distribution, telecom or
@@ -111,7 +122,8 @@ weak_labels <- function(feat, crs = NULL, lines, structures = NULL, buildings = 
     s <- sf::st_coordinates(sf::st_transform(sf::st_geometry(structures), crs))
     d_s <- FNN::get.knnx(s[, 1:2, drop = FALSE], as.matrix(feat[, c("X", "Y")]), k = 1)$nn.dist[, 1] * m
     lab[d_s <= structure_radius_m] <- "structure"
-    ambiguous <- ambiguous | (d_s > structure_radius_m & d_s <= structure_radius_m + margin_m)
+    abstain_m <- max(structure_abstain_m %||% 0, structure_radius_m + margin_m)
+    ambiguous <- ambiguous | (d_s > structure_radius_m & d_s <= abstain_m)
   }
 
   # --- buildings ------------------------------------------------------------

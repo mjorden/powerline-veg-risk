@@ -23,5 +23,6 @@ way. Per span: the worst tier (grow-in > fall-in > no data > none) under
 each bound, the worst confidence (low coverage > bound-dependent >
 robust > measured), summed encroachment areas and strike counts, the
 minimum clearance, length-weighted \code{frac_measured}, minimum coverage,
-and the flight window when the segments carry one.
+the largest structure-masked share (\code{frac_masked}, when the segments
+carry it), and the flight window when the segments carry one.
 }

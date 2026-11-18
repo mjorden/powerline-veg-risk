@@ -47,7 +47,9 @@ and the quantile of return elevations used per bin.}
 \item{max_slope}{Maximum plausible conductor slope (rise / run) between
 adjacent measured bins.}
 
-\item{max_gap_m}{Largest gap between measured bins that is interpolated.}
+\item{max_gap_m}{Largest gap between measured bins that is interpolated;
+also the farthest a neighbouring bin may be to vouch for a bin in the
+slope check.}
 
 \item{min_ground_clear_m, attach_m, max_span_m}{Bounds parameters, metres.}
 }
@@ -57,7 +59,9 @@ tangent along the line), \code{s_m}, \code{seg_id}, \code{ground}, \code{z_lo}, 
 \code{src}. The attribute \code{bins} is a data frame with one row per line
 counting the chainage bins that held conductor returns (\code{n_bins}) and
 how many each sanity check rejected (\code{n_too_few}, \code{n_below_floor},
-\code{n_implausible}), with \code{n_measured} the bins that survived and
+\code{n_implausible}: slope, or no neighbour within \code{max_gap_m}), with
+\code{n_measured} the bins that survived, every one of which the
+interpolation uses, and
 \code{n_above_upper_bound} the measured bins that sit above the support
 chord (kept, but a sign that the support set or \code{attach_m} is wrong),
 so a profile that silently lost most of its returns can be told from
@@ -69,9 +73,10 @@ that the classifier calls wire with probability >= \code{min_p_wire}. Returns
 within \code{structure_mask_m} of a support are ignored (guy wires, crossarms
 and insulators there are elevated and linear too). Each \code{bin_m} chainage
 bin takes a low quantile (\code{q}) of return elevations; bins below the lower
-bound (physically non-compliant, so an artefact) or implying a slope
-steeper than \code{max_slope} to both neighbours are rejected. Surviving bins
-are interpolated across gaps of at most \code{max_gap_m} (\code{src = "measured"}).
+bound (physically non-compliant, so an artefact), or with no neighbouring
+bin within \code{max_gap_m} at a slope of \code{max_slope} or less, are rejected.
+Surviving bins are interpolated across gaps of at most \code{max_gap_m}
+(\code{src = "measured"}).
 Elsewhere the conductor is bracketed (\code{src = "bounded"}):
 }
 \details{

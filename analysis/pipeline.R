@@ -222,7 +222,7 @@ run_case_study_impl <- function(cfg, ctx) {
   # --- 3. Features, weak labels, classifier -----------------------------------
   feat <- point_features(las)
   feat <- weak_labels(feat, crs, st_transform(context, crs), structures, buildings,
-                      wire_search_m = cfg$wire_search_m)
+                      wire_search_m = cfg$wire_search_m, structure_abstain_m = cfg$structure_mask_m)
   feat <- assign_blocks(feat, crs, block_m = 100, n_folds = 5)
   step("featurised ", format(nrow(feat), big.mark = ","), " above-ground points")
   print(table(feat$label, useNA = "ifany"))
@@ -240,6 +240,7 @@ run_case_study_impl <- function(cfg, ctx) {
   fingerprint <- training_fingerprint(
     feat,
     params = list(half_width_m = cfg$half_width_m, wire_search_m = cfg$wire_search_m,
+                  structure_abstain_m = cfg$structure_mask_m,
                   block_m = 100, n_folds = 5,
                   point_features = ctx$params$point_features, weak_labels = ctx$params$weak_labels,
                   train_point_classifier = ctx$params$train_point_classifier,

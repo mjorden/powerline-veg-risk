@@ -228,8 +228,8 @@ read_landsat_window <- function(sc, aoi, buffer_m, template = NULL) {
 #'
 #' 1. The CHM is cleaned the way [assess_risk()] cleans it: cells within
 #'    `structure_mask_m` of a support are unknown, and canopy needs
-#'    `min_support` canopy cells in its 3 x 3 window (removes 1-2 cell poles
-#'    and stray returns). Each Landsat pixel's canopy fraction is then the
+#'    `min_support` canopy cells in its 3 x 3 window or a canopy column
+#'    beneath it (removes isolated returns with air beneath them). Each Landsat pixel's canopy fraction is then the
 #'    share of its *observed* 1 m cells at or above `cover_min_m`, and its
 #'    coverage is the share of its whole 30 m footprint that the LiDAR
 #'    observed. A pixel is scored only if it is canopy-dominated
@@ -273,8 +273,9 @@ read_landsat_window <- function(sc, aoi, buffer_m, template = NULL) {
 #'   rather than canopy or bare ground. Pass the same objects as to
 #'   [assess_risk()] so both screens describe the same canopy.
 #' @param min_support As in [assess_risk()]: a cell counts as canopy only if
-#'   at least this many cells of its 3 x 3 window are canopy. `0` disables
-#'   the filter.
+#'   at least this many cells of its 3 x 3 window are canopy (counted on a
+#'   pit-filled cover) or it stands on a canopy column (`rasters$column`).
+#'   `0` disables the filter.
 #' @param min_canopy_frac Minimum canopy fraction (of observed cells) for a
 #'   Landsat pixel to be scored.
 #' @param min_coverage Minimum share of a pixel's 30 m footprint observed by
@@ -335,10 +336,7 @@ canopy_dryness <- function(composite, rasters, profile, risk, zone_m = 6, corrid
                                        structure_mask_m / m))
     canopy <- terra::mask(canopy, terra::vect(mask), inverse = TRUE, updatevalue = NA)
   }
-  if (min_support > 0) {
-    support <- terra::focal(canopy == 1, w = 3, fun = "sum", na.rm = TRUE)
-    canopy <- terra::ifel(is.na(canopy), NA, terra::ifel(support >= min_support, canopy, 0))
-  }
+  if (min_support > 0) canopy <- crown_support(canopy, 1, min_support, rasters$column)
   frac <- terra::resample(canopy, ls, method = "average")
   # Observed cells over the whole footprint, including the part of a pixel
   # that lies beyond the CHM's extent (no source cells there = unobserved).
