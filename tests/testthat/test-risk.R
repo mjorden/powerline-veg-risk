@@ -621,6 +621,15 @@ test_that("a segment mostly under the structure mask is 'no data', not 'none' (#
   one <- row[1, ]
   s1 <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = one)$segments)
   expect_equal(as.character(s1$priority[s1$seg_id == 1]), "none")   # one pole hides ~1/8 of the zone
+  # One wide structure that fills about half of its station does not trip
+  # the default either: the other half was seen and scored.
+  tower <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(x0 + 50, y0)), crs = utm))
+  st <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = tower, structure_mask_m = 30,
+                                      under_line_m = 30, wire_zone_m = 30)$segments)
+  st <- st[st$seg_id == 1, ]
+  expect_gt(st$frac_masked_under, 0.4)
+  expect_lt(st$frac_masked_under, 0.75)
+  expect_equal(as.character(st$priority), "none")
 })
 
 test_that("the crown-support count is taken on a pit-filled cover (#65)", {

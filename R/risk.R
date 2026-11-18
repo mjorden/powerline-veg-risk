@@ -638,7 +638,12 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #' @param max_masked A segment with more than this share of either band
 #'   under the structure mask, and that would otherwise be `"none"`, is
 #'   tiered `"no data"` too: a masked cell is known to hold a structure, but
-#'   whatever canopy stands there was not scored (#59).
+#'   whatever canopy stands there was not scored (#59). The default is for
+#'   segments that are mostly mask. One structure's own footprint should
+#'   not trip it: an 18 m lattice-tower mask fills half of a 50 m station's
+#'   42 m-wide zone, at the place where the conductor is highest, and that
+#'   station's other half was seen and scored. Read `frac_masked_under`
+#'   beside the tier.
 #' @return A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
 #'   treetops: `tree_id` (`<epsg>:<x>:<y>`, the treetop's position in
 #'   half-metres of the site's canonical UTM CRS, see [tree_ids()], so the
@@ -687,7 +692,7 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
                         wire_zone_m = 10, clearance_target_m = 4.6, cover_min_m = 2,
                         min_support = 6, structures = NULL, structure_mask_m = 8,
                         min_encroach_m2 = 5, coverage_m = wire_zone_m, min_observed = 0.75,
-                        max_masked = 0.5) {
+                        max_masked = 0.75) {
   crs <- sf::st_crs(segments)
   m <- crs_m_per_unit(crs)
   lateral_m <- phase_offset_m + clearance_target_m

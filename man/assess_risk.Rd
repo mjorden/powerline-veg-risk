@@ -22,7 +22,7 @@ assess_risk(
   min_encroach_m2 = 5,
   coverage_m = wire_zone_m,
   min_observed = 0.75,
-  max_masked = 0.5
+  max_masked = 0.75
 )
 }
 \arguments{
@@ -101,7 +101,12 @@ cannot be claimed where the LiDAR did not see the ground.}
 \item{max_masked}{A segment with more than this share of either band
 under the structure mask, and that would otherwise be \code{"none"}, is
 tiered \code{"no data"} too: a masked cell is known to hold a structure, but
-whatever canopy stands there was not scored (#59).}
+whatever canopy stands there was not scored (#59). The default is for
+segments that are mostly mask. One structure's own footprint should
+not trip it: an 18 m lattice-tower mask fills half of a 50 m station's
+42 m-wide zone, at the place where the conductor is highest, and that
+station's other half was seen and scored. Read \code{frac_masked_under}
+beside the tier.}
 }
 \value{
 A list: \code{segments} (\code{sf}, one row per segment) and \code{trees} (\code{sf}
