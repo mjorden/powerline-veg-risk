@@ -593,22 +593,28 @@ run_case_study_impl <- function(cfg, ctx) {
     # the grid cell it came from lives in the sidecar, not a file of its
     # own that a crash could orphan (#56).
     ll <- aoi_lonlat(study)
+    # The reanalysis product is part of the request, so it is part of the
+    # cache key: a record fetched without a pinned model is not reused (#64).
+    wind_model <- or(wc$model, "era5")
     wind_args <- list(lon = round(ll[1], 4), lat = round(ll[2], 4),
-                      start = format(as.Date(wc$start)), end = format(as.Date(wc$end)), url = openmeteo_archive)
+                      start = format(as.Date(wc$start)), end = format(as.Date(wc$end)), url = openmeteo_archive,
+                      model = wind_model)
+    wind_meta <- c("lon", "lat", "model", "elevation_m", "units", "generationtime_ms", "retrieved")
     wind <- cache_get(
       "wind_hourly", wind_args, dir = out, ext = "csv", refresh = cache_policy("wind_hourly"),
-      fetch = function() wind_history(study, wc$start, wc$end),
+      fetch = function() wind_history(study, wc$start, wc$end, model = wind_model),
       read = function(path, meta) {
         w <- fread(path)
         w$time <- as.POSIXct(w$time, tz = "UTC")
-        attr(w, "lon") <- meta$source$lon
-        attr(w, "lat") <- meta$source$lat
+        for (a in wind_meta) attr(w, a) <- meta$source[[a]]
         w
       },
       write = function(x, path) fwrite(x, path),
-      extra = function(x) list(lon = attr(x, "lon"), lat = attr(x, "lat")))
+      extra = function(x) stats::setNames(lapply(wind_meta, function(a) attr(x, a)), wind_meta))
     ctx$inputs$wind <- list(config = wc, request = wind_args, record = attr(wind, "cache"),
                             cell_lon = attr(wind, "lon"), cell_lat = attr(wind, "lat"),
+                            model = attr(wind, "model"), cell_elevation_m = attr(wind, "elevation_m"),
+                            retrieved = attr(wind, "retrieved"),
                             n_hours = nrow(wind), from = format(min(wind$time)), to = format(max(wind$time)))
     fw <- fire_wind_hours(wind, gust_quantile = if (is.null(wc$gust_quantile)) 0.95 else wc$gust_quantile,
                           max_rh = if (is.null(wc$max_rh)) 30 else wc$max_rh)

@@ -8,9 +8,15 @@ tnm_api <- "https://tnmaccess.nationalmap.gov/api/v1/products"
 # socket), and retries on the transient failures these services actually
 # return (Overpass answers 504 on overload; httr2's default retries only 429
 # and 503) and on connection errors.
-vegrisk_request <- function(url, timeout_s = 60, max_tries = 4) {
+#
+# Requests are paced per host (`rate` per second; httr2 keys the throttle by
+# hostname), so a loop over tiles, chunks or forecast cells cannot hammer a
+# public service. The User-Agent carries a contact address when one is
+# configured (see vegrisk_user_agent()).
+vegrisk_request <- function(url, timeout_s = 60, max_tries = 4, rate = 2) {
   httr2::request(url) |>
-    httr2::req_user_agent(vegrisk_ua) |>
+    httr2::req_user_agent(vegrisk_user_agent()) |>
+    httr2::req_throttle(rate = rate) |>
     httr2::req_timeout(timeout_s) |>
     httr2::req_retry(max_tries = max_tries, retry_on_failure = TRUE,
                      is_transient = function(resp) httr2::resp_status(resp) %in% c(429L, 502L, 503L, 504L))

@@ -12,11 +12,45 @@ openmeteo_archive <- "https://archive-api.open-meteo.com/v1/archive"
 nws_api <- "https://api.weather.gov"
 vegrisk_ua <- "vegrisk R package (github.com/mjorden/powerline-veg-risk)"
 
+#' The User-Agent sent with every request
+#'
+#' The National Weather Service asks API clients to identify themselves with
+#' a contact address, and Overpass and The National Map can only reach an
+#' operator who gives one. Set `options(vegrisk.contact = "you@example.org")`
+#' or the environment variable `VEGRISK_CONTACT`; the address is appended to
+#' the package's User-Agent.
+#'
+#' @return A string.
+#' @export
+vegrisk_user_agent <- function() {
+  contact <- getOption("vegrisk.contact", Sys.getenv("VEGRISK_CONTACT"))
+  if (is.null(contact) || !nzchar(contact)) return(vegrisk_ua)
+  sub(")", paste0("; ", contact, ")"), vegrisk_ua, fixed = TRUE)
+}
+
 #' Hourly historical wind and humidity for a corridor
 #'
 #' Fetches hourly 10 m wind speed, gusts and direction and 2 m relative
-#' humidity from the Open-Meteo historical archive (ERA5 reanalysis, roughly
-#' 10-25 km grid; free, no key, CC BY 4.0) at the centroid of `aoi`.
+#' humidity from the Open-Meteo historical archive at the centroid of `aoi`.
+#'
+#' The product is pinned (`model = "era5"`, about 25 km, by default). Left
+#' to its own default the archive answers with a "best match" that changes
+#' product by date: at the Sunshine Canyon site it returned ERA5 up to the
+#' end of 2016 and ECMWF IFS (9 km) from 2017, hour for hour, and the 95th
+#' percentile gust stepped from about 10.5 to about 17 m/s at the change.
+#' A gust percentile taken over such a record, which the forecast
+#' watchlist reuses as its threshold, describes neither product (#64).
+#' `"ecmwf_ifs"` starts in 2017 and resolves terrain-driven winds that
+#' ERA5 smooths away; `"era5"` reaches back decades. A product that does
+#' not cover the whole period returns hours with no gust, which is warned
+#' about. The model, the grid cell's elevation, the units and the time of
+#' retrieval come back as attributes.
+#'
+#' Licence: Open-Meteo data are CC BY 4.0, but the free API (the default
+#' `url`) is for non-commercial use and is rate-limited. Operational use by
+#' a utility needs their commercial plan (pass its endpoint as `url` and
+#' the key as `apikey`) or ERA5 taken directly from the Copernicus Climate
+#' Data Store.
 #'
 #' Reanalysis winds describe the regional flow. They don't resolve terrain
 #' channelling in a canyon or gusts at a ridge crest.
@@ -24,25 +58,50 @@ vegrisk_ua <- "vegrisk R package (github.com/mjorden/powerline-veg-risk)"
 #' @param aoi An `sf`/`sfc` object (any CRS) or a `bbox`.
 #' @param start_date,end_date Dates (or `"YYYY-MM-DD"` strings).
 #' @param url Archive endpoint.
+#' @param model Reanalysis product, passed as Open-Meteo's `models`
+#'   parameter: `"era5"` (from 1940, about 25 km), `"ecmwf_ifs"` (from 2017,
+#'   9 km), among others. `"era5_land"` has no gusts.
+#' @param apikey API key for a commercial endpoint; never recorded.
 #' @return A tibble: `time` (UTC), `wind_ms`, `gust_ms`, `dir_from_deg`
 #'   (direction the wind blows *from*, degrees clockwise from true north) and
-#'   `rh_pct`. Attributes `lon`, `lat` give the grid cell used.
+#'   `rh_pct`. Attributes `lon`, `lat` give the grid cell used, `model` the
+#'   product asked for, `elevation_m` the cell's elevation, `units` the
+#'   units the service reported, `generationtime_ms` its own timing and
+#'   `retrieved` when the answer was fetched (UTC).
 #' @export
-wind_history <- function(aoi, start_date, end_date, url = openmeteo_archive) {
+wind_history <- function(aoi, start_date, end_date, url = openmeteo_archive, model = "era5",
+                         apikey = NULL) {
   ll <- aoi_lonlat(aoi)
-  q <- sprintf(paste0("%s?latitude=%.5f&longitude=%.5f&start_date=%s&end_date=%s",
-                      "&hourly=wind_speed_10m,wind_gusts_10m,wind_direction_10m,relative_humidity_2m",
-                      "&wind_speed_unit=ms&timezone=UTC"),
-               url, ll[2], ll[1], as.Date(start_date), as.Date(end_date))
-  resp <- httr2::request(q) |>
-    httr2::req_user_agent(vegrisk_ua) |>
-    httr2::req_retry(max_tries = 4) |>
-    httr2::req_perform() |>
+  req <- vegrisk_request(url) |>
+    httr2::req_url_query(
+      latitude = sprintf("%.5f", ll[2]), longitude = sprintf("%.5f", ll[1]),
+      start_date = format(as.Date(start_date)), end_date = format(as.Date(end_date)),
+      hourly = "wind_speed_10m,wind_gusts_10m,wind_direction_10m,relative_humidity_2m",
+      wind_speed_unit = "ms", timezone = "UTC", models = model)
+  if (!is.null(apikey) && nzchar(apikey)) req <- httr2::req_url_query(req, apikey = apikey)
+  resp <- httr2::req_perform(req) |>
     httr2::resp_body_json(simplifyVector = TRUE)
-  parse_openmeteo(resp)
+  out <- parse_openmeteo(resp)
+  no_gust <- is.na(out$gust_ms)
+  if (any(no_gust)) {
+    first <- if (all(no_gust)) "none" else format(min(out$time[!no_gust]), "%Y-%m-%d")
+    rlang::warn(sprintf(paste("%d of %d hours have no gust in '%s' (first hour with one: %s).",
+                              "The product may not cover the whole period; a threshold taken from the",
+                              "rest describes fewer years than were asked for."),
+                        sum(no_gust), nrow(out), model, first))
+  }
+  attr(out, "model") <- model
+  attr(out, "retrieved") <- format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  out
 }
 
 parse_openmeteo <- function(resp) {
+  # The request asks for m/s; a service that answered in anything else
+  # would silently rescale every threshold downstream.
+  u <- resp$hourly_units
+  if (!is.null(u$wind_gusts_10m) && !identical(u$wind_gusts_10m, "m/s")) {
+    rlang::abort(sprintf("Open-Meteo returned gusts in '%s', not m/s.", u$wind_gusts_10m))
+  }
   h <- resp$hourly
   num <- function(x) as.numeric(unlist(lapply(x, function(v) if (is.null(v)) NA else v)))
   out <- tibble::tibble(
@@ -54,6 +113,9 @@ parse_openmeteo <- function(resp) {
   )
   attr(out, "lon") <- resp$longitude
   attr(out, "lat") <- resp$latitude
+  attr(out, "elevation_m") <- resp$elevation
+  attr(out, "units") <- u
+  attr(out, "generationtime_ms") <- resp$generationtime_ms
   out
 }
 
@@ -247,13 +309,20 @@ aoi_lonlat <- function(aoi) {
 #' @param aoi An `sf`/`sfc` object (any CRS) or a `bbox`.
 #' @param api NWS API root.
 #' @return A tibble with the same columns as [wind_history()]; attributes
-#'   `office`, `grid`, `updated` (when the NWS grid was issued) and `generated`.
+#'   `office`, `grid`, `updated` (when the NWS grid was issued), `generated`,
+#'   and `raw`: the `/points` and gridpoint responses exactly as received
+#'   (a list of `url`, `retrieved` and `body`), so a watchlist can be
+#'   re-derived from what the service said at the time.
 #' @export
 nws_forecast <- function(aoi, api = nws_api) {
   ll <- aoi_lonlat(aoi)
-  pt <- nws_get(sprintf("%s/points/%.4f,%.4f", api, ll[2], ll[1]))
-  grid <- nws_get(pt$properties$forecastGridData)
+  pt_raw <- nws_get(sprintf("%s/points/%.4f,%.4f", api, ll[2], ll[1]))
+  pt <- pt_raw$json
+  grid_raw <- nws_get(pt$properties$forecastGridData)
+  grid <- grid_raw$json
   out <- parse_nws_grid(grid$properties)
+  attr(out, "raw") <- list(points = pt_raw[c("url", "retrieved", "body")],
+                           gridpoint = grid_raw[c("url", "retrieved", "body")])
   attr(out, "office") <- pt$properties$gridId
   attr(out, "grid") <- paste(pt$properties$gridX, pt$properties$gridY, sep = ",")
   # When the grid was issued, so a watchlist can say which forecast it used.
@@ -266,21 +335,32 @@ nws_forecast <- function(aoi, api = nws_api) {
 #'
 #' @inheritParams nws_forecast
 #' @return A tibble: `event` (e.g. `"Red Flag Warning"`), `onset`, `ends`,
-#'   `headline`. Zero rows when nothing is active.
+#'   `headline`. Zero rows when nothing is active. Attribute `raw` holds the
+#'   response as received (`url`, `retrieved`, `body`).
 #' @export
 nws_alerts <- function(aoi, api = nws_api) {
   ll <- aoi_lonlat(aoi)
   resp <- nws_get(sprintf("%s/alerts/active?point=%.4f,%.4f", api, ll[2], ll[1]))
-  parse_nws_alerts(resp$features)
+  out <- parse_nws_alerts(resp$json$features)
+  attr(out, "raw") <- list(alerts = resp[c("url", "retrieved", "body")])
+  out
 }
 
+# One NWS request through the shared client (timeout, retries on 502/504 and
+# dropped connections, per-host pacing). Returns the parsed JSON with the
+# body as received and when it was fetched.
 nws_get <- function(url) {
-  httr2::request(url) |>
-    httr2::req_user_agent(vegrisk_ua) |>
+  if (identical(vegrisk_user_agent(), vegrisk_ua)) {
+    rlang::warn(paste("No contact address in the User-Agent: the NWS API asks for one.",
+                      "Set options(vegrisk.contact = ) or VEGRISK_CONTACT."),
+                .frequency = "once", .frequency_id = "vegrisk_nws_contact")
+  }
+  resp <- vegrisk_request(url) |>
     httr2::req_headers(Accept = "application/geo+json") |>
-    httr2::req_retry(max_tries = 4) |>
-    httr2::req_perform() |>
-    httr2::resp_body_json()
+    httr2::req_perform()
+  body <- httr2::resp_body_string(resp)
+  list(url = url, retrieved = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"), body = body,
+       json = jsonlite::fromJSON(body, simplifyVector = FALSE))
 }
 
 parse_nws_alerts <- function(features) {
@@ -306,9 +386,20 @@ parse_nws_grid <- function(props) {
     })
     do.call(rbind, parts)
   }
-  kmh <- if (identical(props$windGust$uom, "wmoUnit:m_s-1")) 1 else 1 / 3.6
-  g <- layer("windGust", kmh)
-  w <- layer("windSpeed", if (identical(props$windSpeed$uom, "wmoUnit:m_s-1")) 1 else 1 / 3.6)
+  # A wind layer in a unit this does not know is refused: treating it as
+  # km/h (the usual unit) would rescale every gust without a word (#64).
+  to_ms <- function(name) {
+    uom <- props[[name]]$uom
+    known <- c("wmoUnit:km_h-1" = 1 / 3.6, "wmoUnit:m_s-1" = 1)
+    if (length(props[[name]]$values) == 0) return(1)
+    if (is.null(uom) || !uom %in% names(known)) {
+      rlang::abort(sprintf("NWS `%s` is in an unknown unit (%s); expected one of %s.", name,
+                           if (is.null(uom)) "none given" else uom, paste(names(known), collapse = ", ")))
+    }
+    known[[uom]]
+  }
+  g <- layer("windGust", to_ms("windGust"))
+  w <- layer("windSpeed", to_ms("windSpeed"))
   d <- layer("windDirection")
   r <- layer("relativeHumidity")
   hours <- sort(unique(c(g$time, w$time, d$time, r$time)))

@@ -13,7 +13,10 @@ nws_forecast(aoi, api = nws_api)
 }
 \value{
 A tibble with the same columns as \code{\link[=wind_history]{wind_history()}}; attributes
-\code{office}, \code{grid}, \code{updated} (when the NWS grid was issued) and \code{generated}.
+\code{office}, \code{grid}, \code{updated} (when the NWS grid was issued), \code{generated},
+and \code{raw}: the \verb{/points} and gridpoint responses exactly as received
+(a list of \code{url}, \code{retrieved} and \code{body}), so a watchlist can be
+re-derived from what the service said at the time.
 }
 \description{
 Looks up the NWS forecast grid cell (2.5 km) at the centroid of \code{aoi} and

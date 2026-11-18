@@ -219,3 +219,130 @@ test_that("no fire-weather hours gives NA exposure, not zero, and the count surv
   expect_warning(rk2 <- wind_fall_exposure(sc$risk, sc$profile, few, min_hours = 24), "Only 5")
   expect_equal(unique(sf::st_drop_geometry(rk2$segments)$n_fire_weather_hours), 5L)
 })
+
+test_that("an NWS wind layer in an unknown unit is refused, not read as km/h (#64)", {
+  layer <- function(uom) list(uom = uom, values = list(list(validTime = "2026-10-19T12:00:00+00:00/PT2H", value = 36)))
+  props <- function(gust, speed) list(
+    windGust = layer(gust), windSpeed = layer(speed),
+    windDirection = list(values = list(list(validTime = "2026-10-19T12:00:00+00:00/PT2H", value = 270))),
+    relativeHumidity = list(values = list(list(validTime = "2026-10-19T12:00:00+00:00/PT2H", value = 14))))
+  expect_equal(parse_nws_grid(props("wmoUnit:km_h-1", "wmoUnit:m_s-1"))$gust_ms, c(10, 10))
+  expect_equal(parse_nws_grid(props("wmoUnit:km_h-1", "wmoUnit:m_s-1"))$wind_ms, c(36, 36))
+  expect_error(parse_nws_grid(props("wmoUnit:kn", "wmoUnit:km_h-1")), "windGust.*unknown unit.*wmoUnit:kn")
+  expect_error(parse_nws_grid(props("wmoUnit:km_h-1", NULL)), "windSpeed.*none given")
+  # A layer with no values has no unit to check.
+  p <- props("wmoUnit:km_h-1", "wmoUnit:km_h-1")
+  p$windSpeed <- list(values = list())
+  expect_true(all(is.na(parse_nws_grid(p)$wind_ms)))
+  # Open-Meteo is asked for m/s; an answer in another unit is refused too.
+  om <- list(latitude = 40, longitude = -105, elevation = 1900, generationtime_ms = 0.4,
+             hourly_units = list(wind_gusts_10m = "km/h"),
+             hourly = list(time = "2021-12-30T18:00", wind_speed_10m = 20, wind_gusts_10m = 35,
+                           wind_direction_10m = 275, relative_humidity_2m = 12))
+  expect_error(parse_openmeteo(om), "km/h")
+  om$hourly_units$wind_gusts_10m <- "m/s"
+  w <- parse_openmeteo(om)
+  expect_equal(attr(w, "elevation_m"), 1900)
+  expect_equal(attr(w, "units")$wind_gusts_10m, "m/s")
+})
+
+test_that("the User-Agent carries a contact address when one is configured (#64)", {
+  withr::local_envvar(VEGRISK_CONTACT = "")
+  withr::local_options(vegrisk.contact = NULL)
+  expect_equal(vegrisk_user_agent(), vegrisk_ua)
+  withr::local_envvar(VEGRISK_CONTACT = "ops@example.org")
+  expect_match(vegrisk_user_agent(), "; ops@example.org)", fixed = TRUE)
+  withr::local_options(vegrisk.contact = "veg@example.org")   # the option wins
+  expect_match(vegrisk_user_agent(), "; veg@example.org)", fixed = TRUE)
+  req <- vegrisk_request("https://example.org/x")
+  expect_equal(req$options$useragent, vegrisk_user_agent())
+  expect_equal(req$options$timeout_ms, 60000)
+})
+
+test_that("wind_history pins the reanalysis product and goes through the shared client (#64)", {
+  skip_if_not_installed("httr2", "1.0.0")
+  seen <- NULL
+  mock <- function(req) {
+    seen <<- req
+    httr2::response_json(body = list(
+      latitude = 40.035, longitude = -105.357, elevation = 2012, generationtime_ms = 1.5,
+      hourly_units = list(wind_gusts_10m = "m/s"),
+      hourly = list(time = list("2021-12-30T18:00", "2021-12-30T19:00"), wind_speed_10m = list(20, 22),
+                    wind_gusts_10m = list(35, 30), wind_direction_10m = list(275, 280),
+                    relative_humidity_2m = list(12, 11))))
+  }
+  aoi <- sf::st_sfc(sf::st_point(c(-105.36, 40.03)), crs = 4326)
+  w <- httr2::with_mocked_responses(mock, wind_history(aoi, "2021-12-30", "2021-12-30"))
+  q <- httr2::url_parse(seen$url)$query
+  expect_equal(q$models, "era5")
+  expect_equal(q$wind_speed_unit, "ms")
+  expect_equal(q$start_date, "2021-12-30")
+  expect_null(q$apikey)
+  expect_equal(seen$options$timeout_ms, 60000)           # the shared client's timeout
+  expect_equal(attr(w, "model"), "era5")
+  expect_equal(attr(w, "elevation_m"), 2012)
+  expect_match(attr(w, "retrieved"), "^20[0-9]{2}-[0-9]{2}-[0-9]{2}T")
+  expect_equal(w$gust_ms, c(35, 30))
+  w2 <- httr2::with_mocked_responses(mock, wind_history(aoi, "2021-12-30", "2021-12-30", model = "era5_land",
+                                                        apikey = "k"))
+  expect_equal(httr2::url_parse(seen$url)$query$models, "era5_land")
+  expect_equal(httr2::url_parse(seen$url)$query$apikey, "k")
+  expect_null(attr(w2, "apikey"))
+})
+
+test_that("a product that does not cover the whole period is warned about (#64)", {
+  # IFS before 2017: the hours come back, the gusts do not.
+  partial <- parse_openmeteo(list(latitude = 40, longitude = -105, hourly_units = list(wind_gusts_10m = "m/s"),
+    hourly = list(time = list("2016-12-31T22:00", "2016-12-31T23:00", "2017-01-01T00:00"),
+                  wind_speed_10m = list(NULL, NULL, 12), wind_gusts_10m = list(NULL, NULL, 21),
+                  wind_direction_10m = list(NULL, NULL, 270), relative_humidity_2m = list(NULL, NULL, 15))))
+  expect_equal(is.na(partial$gust_ms), c(TRUE, TRUE, FALSE))
+  skip_if_not_installed("httr2", "1.0.0")
+  body <- '{"latitude":40,"longitude":-105,"elevation":1900,"hourly_units":{"wind_gusts_10m":"m/s"},"hourly":{"time":["2016-12-31T22:00","2016-12-31T23:00","2017-01-01T00:00"],"wind_speed_10m":[null,null,12],"wind_gusts_10m":[null,null,21],"wind_direction_10m":[null,null,270],"relative_humidity_2m":[null,null,15]}}'
+  mock <- function(req) httr2::response(status_code = 200, headers = list(`Content-Type` = "application/json"),
+                                        body = charToRaw(body))
+  aoi <- sf::st_sfc(sf::st_point(c(-105.36, 40.03)), crs = 4326)
+  expect_warning(
+    w <- httr2::with_mocked_responses(mock, wind_history(aoi, "2016-12-31", "2017-01-01", model = "ecmwf_ifs")),
+    "2 of 3 hours have no gust in 'ecmwf_ifs' .first hour with one: 2017-01-01")
+  expect_equal(w$gust_ms, c(NA, NA, 21))
+})
+
+test_that("NWS answers are kept as received beside what was parsed from them (#64)", {
+  skip_if_not_installed("httr2", "1.0.0")
+  withr::local_options(vegrisk.contact = "veg@example.org")
+  urls <- character()
+  grid_body <- list(properties = list(
+    updateTime = "2026-10-19T10:00:00+00:00",
+    windGust = list(uom = "wmoUnit:km_h-1", values = list(list(validTime = "2026-10-19T12:00:00+00:00/PT2H", value = 72))),
+    windSpeed = list(uom = "wmoUnit:km_h-1", values = list(list(validTime = "2026-10-19T12:00:00+00:00/PT2H", value = 36))),
+    windDirection = list(values = list(list(validTime = "2026-10-19T12:00:00+00:00/PT2H", value = 270))),
+    relativeHumidity = list(values = list(list(validTime = "2026-10-19T12:00:00+00:00/PT2H", value = 14)))))
+  mock <- function(req) {
+    urls <<- c(urls, req$url)
+    if (grepl("/points/", req$url)) {
+      httr2::response_json(body = list(properties = list(
+        gridId = "BOU", gridX = 50, gridY = 70, forecastGridData = "https://api.weather.gov/gridpoints/BOU/50,70")))
+    } else if (grepl("/alerts/", req$url)) {
+      httr2::response_json(body = list(features = list(list(properties = list(
+        event = "Red Flag Warning", onset = "2026-10-19T12:00:00-06:00", ends = "2026-10-20T00:00:00-06:00",
+        headline = "Red Flag Warning issued")))))
+    } else httr2::response_json(body = grid_body)
+  }
+  aoi <- sf::st_sfc(sf::st_point(c(-105.36, 40.03)), crs = 4326)
+  fc <- httr2::with_mocked_responses(mock, nws_forecast(aoi))
+  al <- httr2::with_mocked_responses(mock, nws_alerts(aoi))
+  expect_equal(fc$gust_ms, c(20, 20))
+  expect_equal(attr(fc, "office"), "BOU")
+  raw <- attr(fc, "raw")
+  expect_named(raw, c("points", "gridpoint"))
+  expect_equal(raw$gridpoint$url, "https://api.weather.gov/gridpoints/BOU/50,70")
+  # The body is the response text itself: parsing it again gives the same forecast.
+  again <- parse_nws_grid(jsonlite::fromJSON(raw$gridpoint$body, simplifyVector = FALSE)$properties)
+  expect_equal(again$gust_ms, fc$gust_ms)
+  expect_match(raw$points$retrieved, "Z$")
+  expect_equal(al$event, "Red Flag Warning")
+  expect_named(attr(al, "raw"), "alerts")
+  expect_match(attr(al, "raw")$alerts$body, "Red Flag Warning", fixed = TRUE)
+  expect_length(urls, 3)
+})
