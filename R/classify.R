@@ -13,17 +13,31 @@
 
 #' Assign points to spatial blocks and CV folds
 #'
+#' With labels on the table, blocks are dealt to folds class by class,
+#' rarest class first: the blocks that hold a class are taken largest first
+#' and each goes to the fold that so far has the fewest points of that
+#' class. A rare class that sits in a handful of blocks (conductor returns
+#' along one stretch of line) is then spread over as many folds as it has
+#' blocks, instead of landing wherever a shuffle puts it; a purely random
+#' deal once left 76% of a site's wire points in one fold and none in
+#' another (#63). Blocks that hold only the commonest class are dealt at
+#' random, keeping the folds' block counts level. Blocks stay whole, so
+#' this does not leak neighbours between folds.
+#'
 #' @param feat A features table with `X`, `Y`.
 #' @param crs CRS of the coordinates; defaults to the one recorded by
 #'   [point_features()] and must agree with it when both are given.
 #' @param block_m Block edge length in metres.
 #' @param n_folds Number of folds.
 #' @param seed RNG seed for fold assignment.
+#' @param stratify Deal blocks to folds by class presence (see above).
+#'   Defaults to `TRUE` when `feat` has a `label` column with more than one
+#'   class; `FALSE` gives the purely random deal.
 #' @return `feat` with integer columns `block` and `fold`. Block ids are
 #'   numbered by position (west to east, then south to north), so they do
 #'   not depend on row order.
 #' @export
-assign_blocks <- function(feat, crs = NULL, block_m = 100, n_folds = 5, seed = 1) {
+assign_blocks <- function(feat, crs = NULL, block_m = 100, n_folds = 5, seed = 1, stratify = NULL) {
   feat <- data.table::copy(as_point_table(feat))
   crs <- feat_crs(feat, crs)
   m <- crs_m_per_unit(crs)
@@ -32,9 +46,51 @@ assign_blocks <- function(feat, crs = NULL, block_m = 100, n_folds = 5, seed = 1
   feat[, block := data.table::frankv(cells, ties.method = "dense")]
   n_blocks <- max(feat$block)
   if (n_blocks < n_folds) rlang::abort("Fewer spatial blocks than folds; reduce `block_m`.")
-  withr::with_seed(seed, fold_of_block <- sample(rep_len(seq_len(n_folds), n_blocks)))
+  has_classes <- "label" %in% names(feat) && length(unique(stats::na.omit(feat$label))) > 1
+  if (is.null(stratify)) stratify <- has_classes
+  if (stratify && !has_classes) rlang::abort("`stratify = TRUE` needs a `label` column with more than one class.")
+  fold_of_block <- if (stratify) {
+    stratified_folds(table(block = factor(feat$block, levels = seq_len(n_blocks)),
+                           label = droplevels(feat$label)), n_folds, seed)
+  } else {
+    withr::with_seed(seed, sample(rep_len(seq_len(n_folds), n_blocks)))
+  }
   feat[, fold := fold_of_block[block]]
   feat[]
+}
+
+# Deal blocks to folds by class presence. `counts` is a blocks x classes
+# table of labelled points. Classes are taken rarest first (fewest points);
+# the commonest class is not stratified, its blocks are dealt at random to
+# the folds with the fewest blocks. Ties are broken by the seeded shuffle,
+# never by row order.
+stratified_folds <- function(counts, n_folds, seed) {
+  counts <- unclass(counts)
+  n_blocks <- nrow(counts)
+  withr::with_seed(seed, {
+    tie <- sample(n_folds)            # fold preference when everything else ties
+    shuffle <- sample(n_blocks)       # order of the blocks left to chance
+  })
+  fold <- rep(NA_integer_, n_blocks)
+  load <- matrix(0, n_folds, ncol(counts))
+  n_in <- integer(n_folds)
+  classes <- order(colSums(counts))
+  for (cl in classes[-length(classes)]) {
+    todo <- which(is.na(fold) & counts[, cl] > 0)
+    todo <- todo[order(-counts[todo, cl], todo)]
+    for (b in todo) {
+      f <- order(load[, cl], n_in, tie)[1]
+      fold[b] <- f
+      load[f, ] <- load[f, ] + counts[b, ]
+      n_in[f] <- n_in[f] + 1L
+    }
+  }
+  for (b in shuffle[is.na(fold[shuffle])]) {
+    f <- order(n_in, tie)[1]
+    fold[b] <- f
+    n_in[f] <- n_in[f] + 1L
+  }
+  fold
 }
 
 #' Train a random-forest point classifier
@@ -88,6 +144,11 @@ train_point_classifier <- function(feat, n_per_class = 20000, num_trees = 300,
 #' @return Matrix of class probabilities at the training-set prevalence.
 #' @export
 classify_probs <- function(model, feat) {
+  prior_correct(raw_probs(model, feat), model)
+}
+
+# The forest's own class probabilities (equal priors).
+raw_probs <- function(model, feat) {
   feat <- as_point_table(feat)
   vars <- model$forest$independent.variable.names
   missing <- setdiff(vars, names(feat))
@@ -95,7 +156,10 @@ classify_probs <- function(model, feat) {
     rlang::abort(sprintf("`feat` lacks predictor column(s) the model was trained on: %s",
                          paste(missing, collapse = ", ")))
   }
-  p <- stats::predict(model, as.data.frame(feat[, vars, with = FALSE]))$predictions
+  stats::predict(model, as.data.frame(feat[, vars, with = FALSE]))$predictions
+}
+
+prior_correct <- function(p, model) {
   p <- sweep(p, 2, as.numeric(model$prior[colnames(p)]), `*`)
   p / rowSums(p)
 }
@@ -109,33 +173,78 @@ classify_probs <- function(model, feat) {
 #' precision-recall curve; compare it with `prevalence`, its no-skill value)
 #' and balanced accuracy (mean per-class recall of the argmax decision).
 #'
+#' The pooled figures put the held-out points of every fold in one table,
+#' although each fold was scored by its own model. A rare class can sit
+#' almost entirely in one fold, and the pooled average precision is then
+#' that fold's result with the others as noise. `fold_metrics` reports each
+#' fold on its own, and `metrics` carries the spread (`ap_fold_min`,
+#' `ap_fold_median`, `ap_fold_max`) over the folds that hold at least
+#' `min_fold_n` points of the class on both the training and the held-out
+#' side (`n_folds_scored`). Read a pooled figure together with its spread
+#' and with how many folds stand behind it (#63).
+#'
 #' @param feat Labelled features with `fold` (from [assign_blocks()]).
 #' @param eval_veg_frac Fraction of held-out vegetation points scored.
 #' @param random Also run random k-fold CV for comparison.
+#' @param min_fold_n A fold counts towards a class's spread only with at
+#'   least this many points of the class in training and held out.
+#' @param oof Also return the spatial out-of-fold prediction of *every* row
+#'   of `feat`, labelled or not: each point is classified by the model that
+#'   never saw its block. That is the prediction to score against an
+#'   independent reference; scoring the final model on the points it was
+#'   trained on is in-sample.
 #' @inheritParams train_point_classifier
 #' @return A list with `metrics` (one row per scheme and class: `n`
 #'   estimated held-out points, `prevalence`, `precision`, `recall`, `f1`,
-#'   `avg_precision`), `summary` (one row per scheme: `balanced_accuracy`,
-#'   `n_eval`), `confusion` (spatial-CV confusion matrix in estimated point
-#'   counts, rows = weak label, columns = prediction) and `fold_counts`
-#'   (labelled points per spatial fold).
+#'   `avg_precision`, all pooled over folds, then `n_folds_scored`,
+#'   `ap_fold_min`, `ap_fold_median`, `ap_fold_max`), `fold_metrics` (one
+#'   row per scheme, fold and class: `n_train`, `n_test`, `prevalence`,
+#'   `recall`, `avg_precision`, `scored`; a class absent from a fold's
+#'   held-out points has `n_test = 0`), `summary` (one row per scheme:
+#'   `balanced_accuracy`, `n_eval`), `confusion` (spatial-CV confusion
+#'   matrix in estimated point counts, rows = weak label, columns =
+#'   prediction), `fold_counts` (labelled points per spatial fold) and, with
+#'   `oof = TRUE`, `oof` (a data frame in the row order of `feat`: `fold`,
+#'   `pred`, and `p_wire_raw`, the forest's wire probability before the
+#'   prior correction).
 #' @export
 cv_point_classifier <- function(feat, n_per_class = 20000, num_trees = 200, mtry = NULL,
                                 drop_features = NULL, eval_veg_frac = 0.1, random = TRUE,
-                                seed = 1) {
+                                seed = 1, min_fold_n = 20, oof = FALSE) {
   feat <- as_point_table(feat)
   lab <- stable_order(feat[!is.na(label)])
-  run <- function(fold_col) {
-    preds <- vector("list", max(lab[[fold_col]]))
-    for (f in seq_along(preds)) {
+  oof_out <- NULL
+  if (oof) {
+    oof_out <- data.frame(fold = feat$fold, pred = factor(NA_character_, levels = label_levels),
+                          p_wire_raw = NA_real_)
+  }
+  run <- function(fold_col, scheme, keep_oof = FALSE) {
+    n_f <- max(lab[[fold_col]])
+    preds <- vector("list", n_f)
+    folds <- vector("list", n_f)
+    for (f in seq_len(n_f)) {
       tr <- lab[lab[[fold_col]] != f]
       te <- lab[lab[[fold_col]] == f]
+      n_train <- table(factor(tr$label, levels = label_levels))
+      n_test <- table(factor(te$label, levels = label_levels))
+      folds[[f]] <- data.frame(scheme = scheme, fold = f, class = label_levels,
+                               n_train = as.integer(n_train), n_test = as.integer(n_test),
+                               prevalence = as.numeric(n_test) / max(nrow(te), 1),
+                               recall = NA_real_, avg_precision = NA_real_)
       veg <- which(te$label == "vegetation")
       keep <- withr::with_seed(seed + f, c(which(te$label != "vegetation"),
                                            veg[stats::runif(length(veg)) < eval_veg_frac]))
       te <- te[keep]
-      if (nrow(te) == 0) next
+      rows <- if (keep_oof) which(feat$fold == f) else integer()
+      if (nrow(te) == 0 && length(rows) == 0) next
       fit <- train_point_classifier(tr, n_per_class, num_trees, mtry, drop_features, seed + f)
+      if (length(rows)) {
+        raw <- raw_probs(fit, feat[rows])
+        p <- prior_correct(raw, fit)
+        oof_out$pred[rows] <<- factor(colnames(p)[max.col(p, "first")], levels = label_levels)
+        oof_out$p_wire_raw[rows] <<- if ("wire" %in% colnames(raw)) raw[, "wire"] else 0
+      }
+      if (nrow(te) == 0) next
       p <- classify_probs(fit, te)
       full <- matrix(0, nrow(p), length(label_levels), dimnames = list(NULL, label_levels))
       full[, colnames(p)] <- p
@@ -145,25 +254,51 @@ cv_point_classifier <- function(feat, n_per_class = 20000, num_trees = 200, mtry
         w = ifelse(te$label == "vegetation", 1 / eval_veg_frac, 1),
         p = full
       )
+      fm <- class_metrics(preds[[f]], scheme)
+      at <- match(fm$class, folds[[f]]$class)
+      folds[[f]]$recall[at] <- fm$recall
+      folds[[f]]$avg_precision[at] <- fm$avg_precision
     }
-    do.call(rbind, preds)
+    folds <- do.call(rbind, folds)
+    folds <- folds[folds$class %in% levels(droplevels(lab$label)), ]
+    folds$scored <- folds$n_train >= min_fold_n & folds$n_test >= min_fold_n
+    list(preds = do.call(rbind, preds), folds = folds)
+  }
+  # Pooled metrics with the per-fold spread beside them.
+  with_spread <- function(res, scheme) {
+    m <- class_metrics(res$preds, scheme)
+    ok <- res$folds[res$folds$scored & !is.na(res$folds$avg_precision), ]
+    by <- split(ok$avg_precision, factor(ok$class, levels = m$class))
+    m$n_folds_scored <- lengths(by)
+    stat <- function(fun) vapply(by, function(x) if (length(x)) fun(x) else NA_real_, 0)
+    m$ap_fold_min <- stat(min)
+    m$ap_fold_median <- stat(stats::median)
+    m$ap_fold_max <- stat(max)
+    m
   }
 
   withr::with_seed(seed, lab[, random_fold := sample(rep_len(seq_len(max(fold)), .N))])
-  spatial <- run("fold")
-  metrics <- class_metrics(spatial, "spatial_block")
+  sp <- run("fold", "spatial_block", keep_oof = oof)
+  spatial <- sp$preds
+  metrics <- with_spread(sp, "spatial_block")
+  fold_metrics <- sp$folds
   summary <- scheme_summary(spatial, "spatial_block")
   if (random) {
-    rnd <- run("random_fold")
-    metrics <- rbind(metrics, class_metrics(rnd, "random"))
-    summary <- rbind(summary, scheme_summary(rnd, "random"))
+    rn <- run("random_fold", "random")
+    metrics <- rbind(metrics, with_spread(rn, "random"))
+    fold_metrics <- rbind(fold_metrics, rn$folds)
+    summary <- rbind(summary, scheme_summary(rn$preds, "random"))
   }
-  list(
+  rownames(metrics) <- rownames(fold_metrics) <- NULL
+  out <- list(
     metrics = metrics,
+    fold_metrics = fold_metrics,
     summary = summary,
     confusion = round(stats::xtabs(w ~ truth + pred, spatial)),
     fold_counts = table(fold = lab$fold, label = droplevels(lab$label))
   )
+  if (oof) out$oof <- oof_out
+  out
 }
 
 #' Classify all featurised points
