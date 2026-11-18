@@ -49,6 +49,7 @@ reference:
       - osm_power_lines
       - osm_power_structures
       - osm_buildings
+      - vegrisk_user_agent
   - title: Corridor point cloud
     contents:
       - read_corridor

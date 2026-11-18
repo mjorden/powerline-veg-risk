@@ -13,7 +13,8 @@ nws_alerts(aoi, api = nws_api)
 }
 \value{
 A tibble: \code{event} (e.g. \code{"Red Flag Warning"}), \code{onset}, \code{ends},
-\code{headline}. Zero rows when nothing is active.
+\code{headline}. Zero rows when nothing is active. Attribute \code{raw} holds the
+response as received (\code{url}, \code{retrieved}, \code{body}).
 }
 \description{
 Active NWS watches, warnings and advisories at a corridor

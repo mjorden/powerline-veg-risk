@@ -4,7 +4,14 @@
 \alias{wind_history}
 \title{Hourly historical wind and humidity for a corridor}
 \usage{
-wind_history(aoi, start_date, end_date, url = openmeteo_archive)
+wind_history(
+  aoi,
+  start_date,
+  end_date,
+  url = openmeteo_archive,
+  model = "era5",
+  apikey = NULL
+)
 }
 \arguments{
 \item{aoi}{An \code{sf}/\code{sfc} object (any CRS) or a \code{bbox}.}
@@ -12,18 +19,45 @@ wind_history(aoi, start_date, end_date, url = openmeteo_archive)
 \item{start_date, end_date}{Dates (or \code{"YYYY-MM-DD"} strings).}
 
 \item{url}{Archive endpoint.}
+
+\item{model}{Reanalysis product, passed as Open-Meteo's \code{models}
+parameter: \code{"era5"} (from 1940, about 25 km), \code{"ecmwf_ifs"} (from 2017,
+9 km), among others. \code{"era5_land"} has no gusts.}
+
+\item{apikey}{API key for a commercial endpoint; never recorded.}
 }
 \value{
 A tibble: \code{time} (UTC), \code{wind_ms}, \code{gust_ms}, \code{dir_from_deg}
 (direction the wind blows \emph{from}, degrees clockwise from true north) and
-\code{rh_pct}. Attributes \code{lon}, \code{lat} give the grid cell used.
+\code{rh_pct}. Attributes \code{lon}, \code{lat} give the grid cell used, \code{model} the
+product asked for, \code{elevation_m} the cell's elevation, \code{units} the
+units the service reported, \code{generationtime_ms} its own timing and
+\code{retrieved} when the answer was fetched (UTC).
 }
 \description{
 Fetches hourly 10 m wind speed, gusts and direction and 2 m relative
-humidity from the Open-Meteo historical archive (ERA5 reanalysis, roughly
-10-25 km grid; free, no key, CC BY 4.0) at the centroid of \code{aoi}.
+humidity from the Open-Meteo historical archive at the centroid of \code{aoi}.
 }
 \details{
+The product is pinned (\code{model = "era5"}, about 25 km, by default). Left
+to its own default the archive answers with a "best match" that changes
+product by date: at the Sunshine Canyon site it returned ERA5 up to the
+end of 2016 and ECMWF IFS (9 km) from 2017, hour for hour, and the 95th
+percentile gust stepped from about 10.5 to about 17 m/s at the change.
+A gust percentile taken over such a record, which the forecast
+watchlist reuses as its threshold, describes neither product (#64).
+\code{"ecmwf_ifs"} starts in 2017 and resolves terrain-driven winds that
+ERA5 smooths away; \code{"era5"} reaches back decades. A product that does
+not cover the whole period returns hours with no gust, which is warned
+about. The model, the grid cell's elevation, the units and the time of
+retrieval come back as attributes.
+
+Licence: Open-Meteo data are CC BY 4.0, but the free API (the default
+\code{url}) is for non-commercial use and is rate-limited. Operational use by
+a utility needs their commercial plan (pass its endpoint as \code{url} and
+the key as \code{apikey}) or ERA5 taken directly from the Copernicus Climate
+Data Store.
+
 Reanalysis winds describe the regional flow. They don't resolve terrain
 channelling in a canyon or gusts at a ridge crest.
 }

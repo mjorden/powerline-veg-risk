@@ -29,6 +29,12 @@ run_case_study(list(
   vendor_classes = FALSE,              # delivery has no vegetation/building classes
   # Dry-season Landsat 8/9 composite bracketing the 2020 LiDAR flight.
   landsat = list(years = 2019:2021, months = 7:9, dry_index = "ndvi"),
-  # Ten years of hourly reanalysis wind; fire weather = top-5% gusts at RH <= 30%.
-  wind = list(start = "2015-01-01", end = "2024-12-31", gust_quantile = 0.95, max_rh = 30)
+  # Eight years of hourly ECMWF IFS wind (9 km), one product throughout;
+  # fire weather = top-5% gusts at RH <= 30%. The record once began in 2015
+  # with the archive's default product, which turned out to be ERA5 (25 km)
+  # for 2015-2016 and IFS from 2017, so its gust percentile mixed the two
+  # (#64). ERA5 alone covers more years but flattens the Front Range
+  # downslope windstorms: its 95th-percentile gust here is 10.5 m/s against
+  # 17 m/s in IFS.
+  wind = list(start = "2017-01-01", end = "2024-12-31", model = "ecmwf_ifs", gust_quantile = 0.95, max_rh = 30)
 ))
