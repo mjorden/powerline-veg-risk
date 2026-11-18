@@ -104,3 +104,36 @@ test_that("point_features returns finite features for above-ground points", {
   expect_true(all(vapply(feat[, fc, with = FALSE], function(v) all(is.finite(v)), TRUE)))
   expect_true(all(feat$intensity > 0 & feat$intensity < 1))
 })
+
+test_that("tower steel beyond the label radius abstains out to the footprint (#65)", {
+  # Columns of returns (2-15 m, so not suspended) 2, 5, 10 and 25 m from a
+  # tower node, all 30 m+ from the wire.
+  feat <- synthetic_feat()
+  steel <- data.table::as.data.table(expand.grid(d = c(2, 5, 10, 25), height_m = seq(2, 15, 1)))
+  steel <- steel[, .(X = x0 + 50 + d, Y = y0 - 40, height_m, Z = height_m, part = paste0("steel", d))]
+  feat <- rbind(feat, steel)
+  tower <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(x0 + 50, y0 - 40)), crs = utm))
+  part_label <- function(lab, p) unique(as.character(lab$label[lab$part == p]))
+
+  narrow <- weak_labels(feat, utm, line, structures = tower)
+  expect_equal(part_label(narrow, "steel2"), "structure")
+  expect_true(is.na(part_label(narrow, "steel5")))           # the 2 m margin
+  expect_equal(part_label(narrow, "steel10"), "vegetation")  # steel taught as a tree
+
+  wide <- weak_labels(feat, utm, line, structures = tower, structure_abstain_m = 18)
+  expect_equal(part_label(wide, "steel2"), "structure")
+  expect_true(is.na(part_label(wide, "steel5")))
+  expect_true(is.na(part_label(wide, "steel10")))
+  expect_equal(part_label(wide, "steel25"), "vegetation")
+  # A value below the default margin never narrows it.
+  expect_true(is.na(part_label(weak_labels(feat, utm, line, structures = tower, structure_abstain_m = 1), "steel5")))
+})
+
+test_that("points below the air-gap floor in a wire cell are not labelled wire (#65)", {
+  feat <- synthetic_feat()
+  low <- data.table::data.table(X = x0 + 40.25, Y = y0 + 0.3, height_m = 2.5, Z = 2.5, part = "low")
+  feat <- rbind(feat, low)
+  lab <- weak_labels(feat, utm, line, gap_floor_m = 3)
+  expect_true(all(lab$label[lab$part == "wire"] == "wire"))
+  expect_true(is.na(lab$label[lab$part == "low"]))
+})

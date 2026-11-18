@@ -52,8 +52,9 @@ rather than canopy or bare ground. Pass the same objects as to
 \code{\link[=assess_risk]{assess_risk()}} so both screens describe the same canopy.}
 
 \item{min_support}{As in \code{\link[=assess_risk]{assess_risk()}}: a cell counts as canopy only if
-at least this many cells of its 3 x 3 window are canopy. \code{0} disables
-the filter.}
+at least this many cells of its 3 x 3 window are canopy (counted on a
+pit-filled cover) or it stands on a canopy column (\code{rasters$column}).
+\code{0} disables the filter.}
 
 \item{min_canopy_frac}{Minimum canopy fraction (of observed cells) for a
 Landsat pixel to be scored.}
@@ -92,8 +93,8 @@ model decides \emph{which} 30 m pixels to read and how much each one counts:
 \enumerate{
 \item The CHM is cleaned the way \code{\link[=assess_risk]{assess_risk()}} cleans it: cells within
 \code{structure_mask_m} of a support are unknown, and canopy needs
-\code{min_support} canopy cells in its 3 x 3 window (removes 1-2 cell poles
-and stray returns). Each Landsat pixel's canopy fraction is then the
+\code{min_support} canopy cells in its 3 x 3 window or a canopy column
+beneath it (removes isolated returns with air beneath them). Each Landsat pixel's canopy fraction is then the
 share of its \emph{observed} 1 m cells at or above \code{cover_min_m}, and its
 coverage is the share of its whole 30 m footprint that the LiDAR
 observed. A pixel is scored only if it is canopy-dominated

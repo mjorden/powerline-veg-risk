@@ -16,7 +16,9 @@ corridor_rasters(
   drop = NULL,
   void_m = 5,
   linearity = NULL,
-  corridor = NULL
+  corridor = NULL,
+  top_tol_m = 1,
+  column_m = 4
 )
 }
 \arguments{
@@ -57,13 +59,27 @@ error, never silently "not linear".}
 every raster to. The LAS bounding box of a long diagonal corridor is
 mostly empty; masking keeps every later cell table proportional to the
 corridor rather than to its bounding box (#55).}
+
+\item{top_tol_m}{A disputed point (rules: vegetation, classifier: not)
+must stand this far above the cell's remaining canopy for the cell to
+become unobserved. Within a crown the highest return of a cell and the
+next one down differ by less than this.}
+
+\item{column_m}{Depth below a cell's canopy top searched for a lower
+vegetation return when deciding whether the cell has a canopy column
+(see \code{column} under Value).}
 }
 \value{
 A list with \code{dtm} (ground elevation) and \code{chm} (canopy height),
 both \code{SpatRaster} in metres, \code{unobserved} (logical \code{SpatRaster}), \code{void}
-(logical \code{SpatRaster}, the voids alone), \code{n_conductor_excluded} and
+(logical \code{SpatRaster}, the voids alone), \code{column} (logical
+\code{SpatRaster}: the cell's 3 x 3 window holds a consensus vegetation
+return between 1 m and \code{column_m} below the cell's canopy top, so the
+top is the top of a crown and not a return hanging in the air; used by
+the crown-support filter of \code{\link[=assess_risk]{assess_risk()}}), \code{n_conductor_excluded},
 \code{n_uncertain_excluded} (points left out of the canopy model as uncertain,
-conductor exclusions included).
+conductor exclusions included) and \code{n_overtopped_cells} (cells made
+unobserved because a disputed point stood above their canopy).
 }
 \description{
 The canopy height model (CHM) is built from \emph{consensus} vegetation: points
@@ -98,6 +114,13 @@ Cells are returned as \code{unobserved} (unknown, not bare ground) when either
 unlabelled points (the margins around wire / structure / building labels
 and abstained near-line candidates), points the classifier and the rules
 disagree on, and conductor-envelope exclusions - and no canopy remains; or
+\item a point the rules call vegetation and the classifier calls something
+else stands more than \code{top_tol_m} above the canopy that remains in its
+cell. Dropping such a point alone would leave the cell observed at the
+height of its lower returns, and the points most likely to look
+wire-like are the crown tops reaching toward the conductor, so the cell
+would read as a larger clearance than the LiDAR supports (#58). The
+cell's canopy height is set to \code{NA} with it; or
 \item they are LiDAR voids: no return of any class within a \code{void_m} square
 window (missing or truncated tiles, water, dropouts). The TIN terrain
 model interpolates straight across voids, so they would otherwise read as

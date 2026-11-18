@@ -23,7 +23,8 @@ weak_labels(
   min_occupancy = 0.4,
   structure_radius_m = 3,
   building_shrink_m = 1,
-  margin_m = 2
+  margin_m = 2,
+  structure_abstain_m = NULL
 )
 }
 \arguments{
@@ -62,11 +63,19 @@ has at least \code{min_run} cells, spans at least \code{min_extent_m} along the
 line, and occupies at least \code{min_occupancy} of the 1 m chainage bins
 across that span. All members of a qualifying row are wire.}
 
-\item{structure_radius_m}{Radius around pole/tower nodes.}
+\item{structure_radius_m}{Radius around pole/tower nodes labelled
+structure.}
 
 \item{building_shrink_m}{Inward buffer applied to building footprints.}
 
 \item{margin_m}{Width of the unlabelled margin around non-vegetation labels.}
+
+\item{structure_abstain_m}{Points between \code{structure_radius_m} and this
+distance of a node are left unlabelled. Set it to the structure's
+footprint radius (the \code{structure_mask_m} used by \code{\link[=assess_risk]{assess_risk()}}): a
+lattice tower is far wider than the 3 m label radius, and its steel
+beyond that radius would otherwise be taught as vegetation (#65).
+Defaults to \code{structure_radius_m + margin_m}.}
 }
 \value{
 \code{feat} with a factor column \code{label} (levels vegetation, wire,

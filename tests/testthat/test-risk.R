@@ -455,6 +455,13 @@ test_that("coverage counts structure footprints as observed and ignores cells pa
   expect_equal(open$frac_observed[2], 1, tolerance = 0.01)  # past-the-end cells ignored
   expect_lt(open$frac_observed_under[1], 0.9)              # the gap counts...
   expect_gt(masked$frac_observed_under[1], 0.99)           # ...unless it is a known structure
+  # ...and the share that the mask hides is reported beside it (#59):
+  # an 8 m disc in a 50 m x 16 m zone, plus the cells its edge touches.
+  expect_equal(open$frac_masked_under, c(0, 0))
+  expect_gte(masked$frac_masked_under[1], pi * 8^2 / (50 * 16))
+  expect_lt(masked$frac_masked_under[1], 0.3)
+  expect_equal(masked$frac_masked_under[2], 0)
+  expect_lt(masked$frac_masked[1], masked$frac_masked_under[1])  # the wider band dilutes it
 })
 
 test_that("'no data' under both bounds gets 'low coverage' and is drawn apart on the map", {
@@ -545,4 +552,156 @@ test_that("a mostly measured segment whose tier depends on the bound is bound-de
   prof2 <- conductor_profile(wires, s, clear$dtm, min_ground_clear_m = 5, attach_m = 20, search_m = 15)
   rk2 <- sf::st_drop_geometry(assess_risk(clear, prof2, s, tree_ws_m = 3)$segments)
   expect_equal(as.character(rk2$confidence[rk2$seg_id == 1]), "measured")
+})
+
+test_that("a disputed crown top makes its cell unobserved, not observed at its lower returns (#58)", {
+  set.seed(58)
+  # A crown under the line: lower returns at 2-6 m that the rules and the
+  # classifier both call vegetation, and a top at 9-10 m that the rules call
+  # vegetation and the classifier calls wire.
+  low <- data.frame(X = x0 + 30 + runif(300, -1.5, 1.5), Y = y0 + runif(300, -1.5, 1.5), Z = runif(300, 2, 6))
+  top <- data.frame(X = x0 + 30 + runif(60, -0.4, 0.4), Y = y0 + runif(60, -0.4, 0.4), Z = runif(60, 9, 10))
+  # A second crown whose disputed returns sit inside its own canopy surface.
+  other <- data.frame(X = x0 + 45 + runif(300, -1.5, 1.5), Y = y0 + runif(300, -1.5, 1.5), Z = runif(300, 2, 6))
+  # A third, left unlabelled (a label margin): unobserved for the old reason.
+  margin <- data.frame(X = x0 + 10 + runif(60, -0.2, 0.2), Y = y0 + 5.5 + runif(60, -0.2, 0.2), Z = runif(60, 2, 7))
+  las <- make_las(rbind(low, top, other, margin), hole_x = c(52, 58))
+  pred <- pred_for(las, function(x, y, z) ifelse(abs(x - x0 - 10) < 0.5 & abs(y - y0 - 5.5) < 0.5, NA, "vegetation"))
+  pred[height_m > 8, pred := factor("wire", levels = label_levels)]
+  pred[X > x0 + 44.6 & X < x0 + 45.4 & height_m > 4 & height_m < 5, pred := factor("wire", levels = label_levels)]
+
+  r <- corridor_rasters(las, pred)
+  at_top <- cbind(x0 + 30.25, y0 + 0.25)
+  expect_true(is.na(terra::extract(r$chm, at_top)[, 1]))
+  expect_true(terra::extract(r$unobserved, at_top)[, 1] == 1)
+  expect_gt(r$n_overtopped_cells, 0)
+  # The other reasons a cell is unobserved still hold with disputed points
+  # about: an unlabelled crown and a void stay flagged, and no cell of the
+  # flag is NA (an NA would read as observed downstream).
+  expect_true(terra::extract(r$unobserved, cbind(x0 + 10.25, y0 + 5.75))[, 1] == 1)
+  expect_true(terra::extract(r$unobserved, cbind(x0 + 55.25, y0 + 0.25))[, 1] == 1)
+  expect_false(anyNA(terra::values(r$unobserved)))
+  expect_false(anyNA(terra::values(corridor_rasters(las, pred, top_tol_m = Inf)$unobserved)))
+  # The crown's flank, where no disputed point stands, is still canopy.
+  expect_gt(terra::extract(r$chm, cbind(x0 + 31.25, y0 + 1.25))[, 1], 2)
+  # A disputed point inside the canopy surface changes nothing.
+  at_other <- cbind(x0 + 45.25, y0 + 0.25)
+  expect_gt(terra::extract(r$chm, at_other)[, 1], 5)
+  expect_false(terra::extract(r$unobserved, at_other)[, 1] == 1)
+
+  # Before the fix the cell read as ~6 m canopy: 6 m of clearance to a
+  # 12 m conductor where the returns reach within 2 m of it.
+  old <- corridor_rasters(las, pred, top_tol_m = Inf)
+  expect_lt(terra::extract(old$chm, at_top)[, 1], 6.5)
+  expect_equal(old$n_overtopped_cells, 0)
+
+  # The observed share under the line falls with the cell.
+  s <- segs60(30)
+  prof <- conductor_profile(no_wires, s, r$dtm, min_ground_clear_m = 12, attach_m = 12)
+  new_s <- sf::st_drop_geometry(assess_risk(r, prof, s, tree_ws_m = 3)$segments)
+  old_s <- sf::st_drop_geometry(assess_risk(old, prof, s, tree_ws_m = 3)$segments)
+  expect_lt(sum(new_s$frac_observed_under), sum(old_s$frac_observed_under))
+})
+
+test_that("a segment mostly under the structure mask is 'no data', not 'none' (#59)", {
+  r <- make_rasters(data.frame(x = x0 + 150.5, y = y0 + 40.5, h = 4))
+  # A row of mapped vertices every 10 m along segment 1, as a minor line
+  # digitised along a road would give: 8 m discs cover the under-line zone.
+  row <- sf::st_sf(geometry = sf::st_sfc(lapply(seq(5, 95, 10), function(dx) sf::st_point(c(x0 + dx, y0))),
+                                         crs = utm))
+  s <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = row)$segments)
+  s <- s[order(s$seg_id), ]
+  expect_gt(s$frac_observed_under[1], 0.99)   # all of it "observed"...
+  expect_gt(s$frac_masked_under[1], 0.9)      # ...and almost none of it scored
+  expect_equal(as.character(s$priority), c("no data", "none"))
+  expect_equal(as.character(s$confidence[1]), "low coverage")
+  # A real finding still stands, and the threshold can be lifted.
+  lifted <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = row, max_masked = 1)$segments)
+  expect_equal(as.character(lifted$priority[lifted$seg_id == 1]), "none")
+  one <- row[1, ]
+  s1 <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = one)$segments)
+  expect_equal(as.character(s1$priority[s1$seg_id == 1]), "none")   # one pole hides ~1/8 of the zone
+  # One wide structure that fills about half of its station does not trip
+  # the default either: the other half was seen and scored.
+  tower <- sf::st_sf(geometry = sf::st_sfc(sf::st_point(c(x0 + 50, y0)), crs = utm))
+  st <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = tower, structure_mask_m = 30,
+                                      under_line_m = 30, wire_zone_m = 30)$segments)
+  st <- st[st$seg_id == 1, ]
+  expect_gt(st$frac_masked_under, 0.4)
+  expect_lt(st$frac_masked_under, 0.75)
+  expect_equal(as.character(st$priority), "none")
+})
+
+test_that("the crown-support count is taken on a pit-filled cover (#65)", {
+  r <- terra::rast(xmin = 0, xmax = 9, ymin = 0, ymax = 9, resolution = 1, crs = "EPSG:26913")
+  v <- matrix(0, 9, 9)
+  v[4:6, 4:6] <- 8
+  v[5, 5] <- 0            # a pit in a 3 x 3 crown: no return came back from its middle
+  chm <- terra::setValues(r, as.vector(t(v)))
+  out <- matrix(terra::values(crown_support(chm, 2, 6))[, 1], 9, 9, byrow = TRUE)
+  # Each edge-middle cell has 5 canopy cells in its window plus the pit.
+  expect_equal(out[4, 5], 8)
+  expect_equal(out[5, 4], 8)
+  expect_equal(out[4, 4], 0)   # corners still go
+  expect_equal(out[5, 5], 0)   # the pit is counted, not invented as canopy
+  # Without pit filling the whole ring fails the count.
+  expect_true(all(matrix(terra::values(crown_support(chm, 2, 6, pit_min = 9))[, 1], 9, 9, byrow = TRUE) == 0))
+  # NA stays NA.
+  chm[1] <- NA
+  expect_true(is.na(terra::values(crown_support(chm, 2, 6))[1, 1]))
+})
+
+test_that("a narrow crown on a canopy column survives the support filter; a return in the air does not (#65)", {
+  set.seed(65)
+  # A conifer under a metre across with returns from 2 to 10 m, and a tight
+  # cluster of returns at 10 m with nothing beneath (a stray conductor
+  # return the classifier called vegetation). Both are under the line, each
+  # inside one 1 m cell.
+  conifer <- data.frame(X = x0 + 15.5 + runif(80, -0.3, 0.3), Y = y0 + 0.5 + runif(80, -0.3, 0.3),
+                        Z = runif(80, 2, 10))
+  stray <- data.frame(X = x0 + 45.5 + runif(12, -0.3, 0.3), Y = y0 + 0.5 + runif(12, -0.3, 0.3),
+                      Z = runif(12, 9.8, 10.2))
+  las <- make_las(rbind(conifer, stray))
+  r <- corridor_rasters(las, pred_for(las, function(x, y, z) "vegetation"))
+  expect_true(terra::extract(r$column, cbind(x0 + 15.5, y0 + 0.5))[, 1] == 1)
+  expect_false(terra::extract(r$column, cbind(x0 + 45.5, y0 + 0.5))[, 1] == 1)
+  expect_true(is.na(terra::extract(r$column, cbind(x0 + 30.25, y0 + 10.25))[, 1]))  # no canopy, no answer
+
+  s <- segs60(30)
+  prof <- conductor_profile(no_wires, s, r$dtm, min_ground_clear_m = 12, attach_m = 12)
+  rk <- sf::st_drop_geometry(assess_risk(r, prof, s, tree_ws_m = 3)$segments)
+  rk <- rk[order(rk$seg_id), ]
+  expect_gt(rk$wire_zone_max_h_m[1], 9)       # the conifer keeps its top
+  expect_lt(rk$min_clearance_lo_m[1], 3)      # and its clearance is reported
+  expect_equal(rk$wire_zone_max_h_m[2], 0)    # the stray return is not a tree
+
+  # The count alone (rasters without `column`) removes both: the conifer is
+  # one cell across.
+  r$column <- NULL
+  old <- sf::st_drop_geometry(assess_risk(r, prof, s, tree_ws_m = 3)$segments)
+  expect_equal(old$wire_zone_max_h_m[old$seg_id == 1], 0)
+})
+
+test_that("a bin is vouched for only by a neighbour within max_gap_m, so every measured bin is used (#65)", {
+  b <- data.frame(s_m = c(10, 15, 20, 25, 60, 200), z = c(20, 20.5, 32, 21, 25, 90))
+  # 60 is 35 m from 25, so it no longer vouches for it (nor 25 for 60), and
+  # 25's other neighbour is the 32 m spike.
+  expect_equal(plausible_bins(b, max_slope = 0.2, max_gap = 30)$s_m, c(10, 15))
+  expect_equal(plausible_bins(b, max_slope = 0.2, max_gap = 40)$s_m, c(10, 15, 25, 60))
+
+  s <- segs()
+  dtm <- make_rasters(data.frame(x = x0 + 1, y = y0 + 40, h = 0.5))$dtm
+  # A healthy run along 0-50 m and one lone bin at the same height 100 m on.
+  w <- data.table::as.data.table(rbind(
+    data.frame(X = x0 + seq(0.5, 49.5, 0.5), Y = y0, height_m = 12),
+    data.frame(X = x0 + 150 + 0:4 * 0.5, Y = y0, height_m = 12)))
+  w[, `:=`(pred = factor("wire", levels = label_levels), label = factor("wire", levels = label_levels))]
+  prof <- conductor_profile(w, s, dtm, min_ground_clear_m = 10, attach_m = 10, search_m = 15)
+  b <- attr(prof, "bins")
+  expect_equal(b$n_bins, 11)
+  expect_equal(b$n_implausible, 1)
+  expect_equal(b$n_measured, 10)
+  # Nothing is measured around the lone bin, and the count says so.
+  expect_true(all(prof$src[prof$s_m > 60] == "bounded"))
+  expect_true(any(prof$src[prof$s_m < 45] == "measured"))
 })

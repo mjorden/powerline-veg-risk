@@ -21,7 +21,8 @@ assess_risk(
   structure_mask_m = 8,
   min_encroach_m2 = 5,
   coverage_m = wire_zone_m,
-  min_observed = 0.75
+  min_observed = 0.75,
+  max_masked = 0.75
 )
 }
 \arguments{
@@ -59,10 +60,19 @@ vegetation clearance distance, which is smaller.}
 \item{cover_min_m}{Canopy height counted as cover.}
 
 \item{min_support}{A CHM cell counts as canopy only if at least this many
-cells of its 3 x 3 window are >= \code{cover_min_m}. Removes 1-2 cell features
-(unmapped single poles, stray conductor returns classified as vegetation)
-that would otherwise appear as trees directly under the line. It also
-trims crown edges slightly.}
+cells of its 3 x 3 window are >= \code{cover_min_m}, or if it stands on a
+canopy column (\code{rasters$column}, see \code{\link[=corridor_rasters]{corridor_rasters()}}). Removes
+isolated returns with air beneath them - stray conductor returns
+classified as vegetation, pole tops - that would otherwise appear as
+trees directly under the line. What it does not do: a strip two cells
+wide passes the count away from its ends (an interior cell has 2 x 3 = 6
+supporting cells), so a pole line or a two-cell ribbon of conductor
+returns survives unless it has no column and is one cell wide. Support
+is counted on a pit-filled cover, so a sparse crown is not eroded from
+the inside, and a narrow crown with returns down its flanks is kept
+whole by the column test (#65). With rasters that carry no \code{column}
+(hand-built ones), only the count applies and crowns under about 3 m
+across lose their edge cells.}
 
 \item{structures}{Optional \code{sf} points of support structures (e.g. OSM
 pole/tower nodes and the line's own vertices, which OSM mappers place at
@@ -71,8 +81,10 @@ H-frames and crossarms are not scored as trees under the line.}
 
 \item{structure_mask_m}{Mask radius around each structure (metres); should
 cover the structure's across-line width. Masked cells are excluded from
-cover and clearance and trees there are not scored, but they count as
-observed for \code{frac_observed} (a known structure, not a data gap).}
+cover and clearance and trees there are not scored. They count as
+observed for \code{frac_observed} (a known structure, not a data gap), and
+their share is reported as \code{frac_masked} / \code{frac_masked_under}, because
+nothing was scored there either.}
 
 \item{min_encroach_m2}{Canopy area inside the clearance envelope needed to
 call a segment grow-in (guards against single-cell artefacts).}
@@ -85,6 +97,16 @@ voids beside the line, where strike trees stand, count too.}
 \code{coverage_m} band or the \code{under_line_m} zone is below this, and that
 would otherwise be \code{"none"}, is tiered \code{"no data"}: absence of risk
 cannot be claimed where the LiDAR did not see the ground.}
+
+\item{max_masked}{A segment with more than this share of either band
+under the structure mask, and that would otherwise be \code{"none"}, is
+tiered \code{"no data"} too: a masked cell is known to hold a structure, but
+whatever canopy stands there was not scored (#59). The default is for
+segments that are mostly mask. One structure's own footprint should
+not trip it: an 18 m lattice-tower mask fills half of a 50 m station's
+42 m-wide zone, at the place where the conductor is highest, and that
+station's other half was seen and scored. Read \code{frac_masked_under}
+beside the tier.}
 }
 \value{
 A list: \code{segments} (\code{sf}, one row per segment) and \code{trees} (\code{sf}
@@ -105,7 +127,10 @@ carry \code{n_strike_possible} and \code{n_strike_certain}, which the tiers use.
 grid cells within \code{coverage_m} and \code{under_line_m} of the segment (not
 past the line's ends) with an observed terrain and canopy value; cells
 off the edge of the data count as unobserved, structure-masked cells as
-observed (known structures, not gaps).
+observed (known structures, not gaps). \code{frac_masked} and
+\code{frac_masked_under} are the shares of the same two bands that lie under
+the structure mask, so \code{frac_observed - frac_masked} is the share that
+was both seen and scored.
 \code{priority} is the optimistic tier: grow-in under the upper conductor
 bound, fall-in only from trees that strike at every plausible conductor
 elevation; \code{priority_lo} is the pessimistic tier: grow-in under the
@@ -113,7 +138,7 @@ lower bound, fall-in from trees that strike at some plausible elevation.
 The pessimistic tier saturates wherever canopy stands under a bounded
 span (the lower bound is only ~5 m above ground). Tiers are
 \code{"grow-in"}, \code{"fall-in"}, \code{"no data"} (no risk found, but coverage below
-\code{min_observed}) and \code{"none"}. A grow-in or fall-in finding stands even
+\code{min_observed} or a masked share above \code{max_masked}) and \code{"none"}. A grow-in or fall-in finding stands even
 at low coverage, though unseen cells could hide a more severe tier.
 \code{confidence} is \code{"measured"} (conductor observed over at least half the
 segment \emph{and} the same tier under both bounds), \code{"robust"} (same tier

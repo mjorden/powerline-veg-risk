@@ -222,7 +222,7 @@ run_case_study_impl <- function(cfg, ctx) {
   # --- 3. Features, weak labels, classifier -----------------------------------
   feat <- point_features(las)
   feat <- weak_labels(feat, crs, st_transform(context, crs), structures, buildings,
-                      wire_search_m = cfg$wire_search_m)
+                      wire_search_m = cfg$wire_search_m, structure_abstain_m = cfg$structure_mask_m)
   feat <- assign_blocks(feat, crs, block_m = 100, n_folds = 5)
   step("featurised ", format(nrow(feat), big.mark = ","), " above-ground points")
   print(table(feat$label, useNA = "ifany"))
@@ -240,6 +240,7 @@ run_case_study_impl <- function(cfg, ctx) {
   fingerprint <- training_fingerprint(
     feat,
     params = list(half_width_m = cfg$half_width_m, wire_search_m = cfg$wire_search_m,
+                  structure_abstain_m = cfg$structure_mask_m,
                   block_m = 100, n_folds = 5,
                   point_features = ctx$params$point_features, weak_labels = ctx$params$weak_labels,
                   train_point_classifier = ctx$params$train_point_classifier,
@@ -313,11 +314,12 @@ run_case_study_impl <- function(cfg, ctx) {
   supports <- all_supports[all_supports$use, ]
   step(sprintf("supports: %d line vertices, %d confirmed by tagged structures, %d used for the upper bound",
                nrow(all_supports), sum(all_supports$confirmed), nrow(supports)))
-  # Masking is the conservative direction: every tagged structure and every
-  # vertex of every circuit sharing the corridor.
-  mask_supports <- st_sf(geometry = c(st_geometry(st_transform(structures, crs)),
-                                      st_geometry(line_vertex_points(st_transform(lines, crs))),
-                                      st_geometry(line_vertex_points(st_transform(context, crs)))))
+  # Masked: every tagged structure, and the study line's own supports (its
+  # confirmed vertices, or every vertex when none is tagged). Bend vertices
+  # of the other mapped lines are not structures: a `minor_line` digitised
+  # along a road would hide a strip of the corridor under a row of discs
+  # while the coverage figure stayed near 1 (#59).
+  mask_supports <- st_sf(geometry = c(st_geometry(st_transform(structures, crs)), st_geometry(supports)))
   profile <- conductor_profile(pred, segments, rasters$dtm, supports = supports,
                                search_m = cfg$wire_search_m, structure_mask_m = cfg$structure_mask_m,
                                min_ground_clear_m = cfg$min_ground_clear_m, attach_m = cfg$attach_m)
@@ -463,10 +465,14 @@ run_case_study_impl <- function(cfg, ctx) {
                sum(risk$trees$strike_possible), sum(risk$trees$strike_certain),
                sum(risk$trees$strike_lo), sum(risk$trees$strike_hi)))
   print(table(risk$segments$confidence))
-  step(sprintf("LiDAR coverage: %d uncertain points excluded; segment coverage median %.2f, min %.2f (under line min %.2f); %d 'no data'",
-               ours$rasters$n_uncertain_excluded, stats::median(risk$segments$frac_observed),
+  step(sprintf("LiDAR coverage: %d uncertain points excluded, %d cells unobserved under a disputed crown top; segment coverage median %.2f, min %.2f (under line min %.2f); %d 'no data'",
+               ours$rasters$n_uncertain_excluded, ours$rasters$n_overtopped_cells,
+               stats::median(risk$segments$frac_observed),
                min(risk$segments$frac_observed), min(risk$segments$frac_observed_under),
                sum(risk$segments$priority_lo == "no data")))
+  step(sprintf("structure mask: %d discs of %g m; masked share of the under-line zone median %.2f, max %.2f",
+               nrow(mask_supports), cfg$structure_mask_m, stats::median(risk$segments$frac_masked_under),
+               max(risk$segments$frac_masked_under)))
 
   # Same screen on canopy models built from the vendor's vegetation classes:
   # as delivered, and with the same conductor exclusion (separates the
@@ -664,6 +670,9 @@ run_case_study_impl <- function(cfg, ctx) {
                                priority = table(risk$spans$priority), confidence = table(risk$spans$confidence),
                                canonical_crs = canonical_crs(risk$segments)$epsg),
                   n_conductor_excluded = rasters$n_conductor_excluded,
+                  n_overtopped_cells = rasters$n_overtopped_cells,
+                  mask = list(n_discs = nrow(mask_supports), radius_m = cfg$structure_mask_m,
+                              frac_masked_under = summary(risk$segments$frac_masked_under)),
                   landsat = if (!is.null(dryness)) attr(dryness$segments, "landsat"),
                   landsat_scenes = if (!is.null(dryness)) scene_counts,
                   wind = if (!is.null(attr(risk$segments, "wind"))) {
