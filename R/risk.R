@@ -114,6 +114,13 @@ segment_lines <- function(lines, crs, seg_m = 50, ways = NULL) {
 #'   unlabelled points (the margins around wire / structure / building labels
 #'   and abstained near-line candidates), points the classifier and the rules
 #'   disagree on, and conductor-envelope exclusions - and no canopy remains; or
+#' * a point the rules call vegetation and the classifier calls something
+#'   else stands more than `top_tol_m` above the canopy that remains in its
+#'   cell. Dropping such a point alone would leave the cell observed at the
+#'   height of its lower returns, and the points most likely to look
+#'   wire-like are the crown tops reaching toward the conductor, so the cell
+#'   would read as a larger clearance than the LiDAR supports (#58). The
+#'   cell's canopy height is set to `NA` with it; or
 #' * they are LiDAR voids: no return of any class within a `void_m` square
 #'   window (missing or truncated tiles, water, dropouts). The TIN terrain
 #'   model interpolates straight across voids, so they would otherwise read as
@@ -145,19 +152,24 @@ segment_lines <- function(lines, crs, seg_m = 50, ways = NULL) {
 #' @param void_m Width of the square window (metres) that must contain no
 #'   LiDAR return of any class for a cell to count as a void. Wide enough
 #'   that ordinary point spacing never empties it (3DEP QL2 is >= 2 pts/m^2).
+#' @param top_tol_m A disputed point (rules: vegetation, classifier: not)
+#'   must stand this far above the cell's remaining canopy for the cell to
+#'   become unobserved. Within a crown the highest return of a cell and the
+#'   next one down differ by less than this.
 #' @param corridor Optional polygon (`sf`/`sfc`, any CRS) to crop and mask
 #'   every raster to. The LAS bounding box of a long diagonal corridor is
 #'   mostly empty; masking keeps every later cell table proportional to the
 #'   corridor rather than to its bounding box (#55).
 #' @return A list with `dtm` (ground elevation) and `chm` (canopy height),
 #'   both `SpatRaster` in metres, `unobserved` (logical `SpatRaster`), `void`
-#'   (logical `SpatRaster`, the voids alone), `n_conductor_excluded` and
+#'   (logical `SpatRaster`, the voids alone), `n_conductor_excluded`,
 #'   `n_uncertain_excluded` (points left out of the canopy model as uncertain,
-#'   conductor exclusions included).
+#'   conductor exclusions included) and `n_overtopped_cells` (cells made
+#'   unobserved because a disputed point stood above their canopy).
 #' @export
 corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 15,
                              below_m = 1, min_linearity = 0.6, gap_m = 1.5, drop = NULL,
-                             void_m = 5, linearity = NULL, corridor = NULL) {
+                             void_m = 5, linearity = NULL, corridor = NULL, top_tol_m = 1) {
   pred <- as_point_table(pred, "pred")
   check_las_match(las, pred)
   m <- las_m_per_unit(las)
@@ -173,6 +185,11 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
   # Kept out of the canopy model without being known non-canopy.
   uncertain <- !consensus & !(pred$label %in% c("wire", "structure", "building"))
   if (!is.null(drop)) uncertain <- uncertain & !drop
+  # Disputed points: vegetation by the rules, something else by the
+  # classifier. Conductor-envelope exclusions (below) are not among them:
+  # those are meant to come off the top of the canopy.
+  disputed <- pred$label %in% "vegetation" & !(pred$pred %in% "vegetation")
+  if (!is.null(drop)) disputed <- disputed & !drop
   hit_rows <- integer()
   if (!is.null(profile) && any(profile$src == "measured")) {
     cand <- which(consensus)
@@ -240,14 +257,25 @@ corridor_rasters <- function(las, pred, res_m = 1, profile = NULL, envelope_m = 
   n_ret <- count_cells(cbind(las$X, las$Y))
   w <- 2L * floor(void_m / res_m / 2) + 1L # odd window, no wider than void_m
   void <- terra::focal(n_ret, w = w, fun = "sum", na.rm = TRUE) == 0
-  unobserved <- (excluded & is.na(chm)) | void
+  # A disputed point above the canopy left in its cell: the cell's height
+  # is unknown, not the height of its lower returns (#58).
+  overtopped <- terra::setValues(terra::rast(dtm), FALSE)
+  if (any(disputed)) {
+    top <- terra::rasterize(as.matrix(pred[which(disputed), c("X", "Y")]), dtm,
+                            values = zrel[disputed], fun = "max")
+    overtopped <- !is.na(top) & !is.na(chm) & top > chm + top_tol_m / m
+    chm <- terra::mask(chm, overtopped, maskvalues = TRUE)
+  }
+  n_overtopped <- sum(terra::values(overtopped), na.rm = TRUE)
+  unobserved <- (excluded & is.na(chm)) | overtopped | void
   # Z is assumed to share the horizontal unit (true for both case studies).
   out <- list(dtm = dtm * m, chm = chm * m, unobserved = unobserved, void = void)
   if (!is.null(corridor)) {
     poly <- terra::vect(sf::st_transform(sf::st_geometry(corridor), crs))
     out <- lapply(out, function(x) terra::mask(terra::crop(x, poly, snap = "out"), poly))
   }
-  c(out, list(n_conductor_excluded = length(hit_rows), n_uncertain_excluded = sum(uncertain)))
+  c(out, list(n_conductor_excluded = length(hit_rows), n_uncertain_excluded = sum(uncertain),
+              n_overtopped_cells = n_overtopped))
 }
 
 # A per-point column from the features table, or from `las` by row index

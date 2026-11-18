@@ -546,3 +546,43 @@ test_that("a mostly measured segment whose tier depends on the bound is bound-de
   rk2 <- sf::st_drop_geometry(assess_risk(clear, prof2, s, tree_ws_m = 3)$segments)
   expect_equal(as.character(rk2$confidence[rk2$seg_id == 1]), "measured")
 })
+
+test_that("a disputed crown top makes its cell unobserved, not observed at its lower returns (#58)", {
+  set.seed(58)
+  # A crown under the line: lower returns at 2-6 m that the rules and the
+  # classifier both call vegetation, and a top at 9-10 m that the rules call
+  # vegetation and the classifier calls wire.
+  low <- data.frame(X = x0 + 30 + runif(300, -1.5, 1.5), Y = y0 + runif(300, -1.5, 1.5), Z = runif(300, 2, 6))
+  top <- data.frame(X = x0 + 30 + runif(60, -0.4, 0.4), Y = y0 + runif(60, -0.4, 0.4), Z = runif(60, 9, 10))
+  # A second crown whose disputed returns sit inside its own canopy surface.
+  other <- data.frame(X = x0 + 45 + runif(300, -1.5, 1.5), Y = y0 + runif(300, -1.5, 1.5), Z = runif(300, 2, 6))
+  las <- make_las(rbind(low, top, other))
+  pred <- pred_for(las, function(x, y, z) "vegetation")
+  pred[height_m > 8, pred := factor("wire", levels = label_levels)]
+  pred[X > x0 + 44.6 & X < x0 + 45.4 & height_m > 4 & height_m < 5, pred := factor("wire", levels = label_levels)]
+
+  r <- corridor_rasters(las, pred)
+  at_top <- cbind(x0 + 30.25, y0 + 0.25)
+  expect_true(is.na(terra::extract(r$chm, at_top)[, 1]))
+  expect_true(terra::extract(r$unobserved, at_top)[, 1] == 1)
+  expect_gt(r$n_overtopped_cells, 0)
+  # The crown's flank, where no disputed point stands, is still canopy.
+  expect_gt(terra::extract(r$chm, cbind(x0 + 31.25, y0 + 1.25))[, 1], 2)
+  # A disputed point inside the canopy surface changes nothing.
+  at_other <- cbind(x0 + 45.25, y0 + 0.25)
+  expect_gt(terra::extract(r$chm, at_other)[, 1], 5)
+  expect_false(terra::extract(r$unobserved, at_other)[, 1] == 1)
+
+  # Before the fix the cell read as ~6 m canopy: 6 m of clearance to a
+  # 12 m conductor where the returns reach within 2 m of it.
+  old <- corridor_rasters(las, pred, top_tol_m = Inf)
+  expect_lt(terra::extract(old$chm, at_top)[, 1], 6.5)
+  expect_equal(old$n_overtopped_cells, 0)
+
+  # The observed share under the line falls with the cell.
+  s <- segs60(30)
+  prof <- conductor_profile(no_wires, s, r$dtm, min_ground_clear_m = 12, attach_m = 12)
+  new_s <- sf::st_drop_geometry(assess_risk(r, prof, s, tree_ws_m = 3)$segments)
+  old_s <- sf::st_drop_geometry(assess_risk(old, prof, s, tree_ws_m = 3)$segments)
+  expect_lt(sum(new_s$frac_observed_under), sum(old_s$frac_observed_under))
+})
