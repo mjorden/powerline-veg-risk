@@ -210,7 +210,8 @@ way_chainage <- function(xy, lines, crs) {
 #' each bound, the worst confidence (low coverage > bound-dependent >
 #' robust > measured), summed encroachment areas and strike counts, the
 #' minimum clearance, length-weighted `frac_measured`, minimum coverage,
-#' and the flight window when the segments carry one.
+#' the largest structure-masked share (`frac_masked`, when the segments
+#' carry it), and the flight window when the segments carry one.
 #'
 #' @param segments Output of [assess_risk()] (`$segments`).
 #' @param spans Output of [line_spans()].
@@ -235,6 +236,7 @@ span_summary <- function(segments, spans, lines) {
   worst <- function(x, lv) { x <- as.character(x); x <- x[!is.na(x)]; if (!length(x)) NA_character_ else lv[min(match(x, lv))] }
   sum0 <- function(x) if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE)
   min0 <- function(x) if (all(is.na(x))) NA_real_ else min(x, na.rm = TRUE)
+  max0 <- function(x) if (is.null(x) || all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
   has_time <- "flight_from" %in% names(seg)
   agg <- lapply(split(seg, seg$span_id), function(d) {
     w <- d$length_m / sum(d$length_m)
@@ -243,6 +245,7 @@ span_summary <- function(segments, spans, lines) {
       priority = worst(d$priority, tiers), priority_lo = worst(d$priority_lo, tiers),
       confidence = worst(d$confidence, confs),
       frac_measured = sum(w * d$frac_measured), frac_observed = min0(d$frac_observed),
+      frac_masked = max0(d$frac_masked),
       encroach_lo_m2 = sum0(d$encroach_lo_m2), encroach_hi_m2 = sum0(d$encroach_hi_m2),
       min_clearance_lo_m = min0(d$min_clearance_lo_m), min_clearance_hi_m = min0(d$min_clearance_hi_m),
       n_strike_possible = sum0(d$n_strike_possible), n_strike_certain = sum0(d$n_strike_certain),

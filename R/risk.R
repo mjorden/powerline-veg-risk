@@ -535,8 +535,10 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   H-frames and crossarms are not scored as trees under the line.
 #' @param structure_mask_m Mask radius around each structure (metres); should
 #'   cover the structure's across-line width. Masked cells are excluded from
-#'   cover and clearance and trees there are not scored, but they count as
-#'   observed for `frac_observed` (a known structure, not a data gap).
+#'   cover and clearance and trees there are not scored. They count as
+#'   observed for `frac_observed` (a known structure, not a data gap), and
+#'   their share is reported as `frac_masked` / `frac_masked_under`, because
+#'   nothing was scored there either.
 #' @param min_support A CHM cell counts as canopy only if at least this many
 #'   cells of its 3 x 3 window are >= `cover_min_m`. Removes 1-2 cell features
 #'   (unmapped single poles, stray conductor returns classified as vegetation)
@@ -551,6 +553,10 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   `coverage_m` band or the `under_line_m` zone is below this, and that
 #'   would otherwise be `"none"`, is tiered `"no data"`: absence of risk
 #'   cannot be claimed where the LiDAR did not see the ground.
+#' @param max_masked A segment with more than this share of either band
+#'   under the structure mask, and that would otherwise be `"none"`, is
+#'   tiered `"no data"` too: a masked cell is known to hold a structure, but
+#'   whatever canopy stands there was not scored (#59).
 #' @return A list: `segments` (`sf`, one row per segment) and `trees` (`sf`
 #'   treetops: `tree_id` (`<epsg>:<x>:<y>`, the treetop's position in
 #'   half-metres of the site's canonical UTM CRS, see [tree_ids()], so the
@@ -569,7 +575,10 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   grid cells within `coverage_m` and `under_line_m` of the segment (not
 #'   past the line's ends) with an observed terrain and canopy value; cells
 #'   off the edge of the data count as unobserved, structure-masked cells as
-#'   observed (known structures, not gaps).
+#'   observed (known structures, not gaps). `frac_masked` and
+#'   `frac_masked_under` are the shares of the same two bands that lie under
+#'   the structure mask, so `frac_observed - frac_masked` is the share that
+#'   was both seen and scored.
 #'   `priority` is the optimistic tier: grow-in under the upper conductor
 #'   bound, fall-in only from trees that strike at every plausible conductor
 #'   elevation; `priority_lo` is the pessimistic tier: grow-in under the
@@ -577,7 +586,7 @@ taut_upper <- function(s, z, max_span, step = 5) {
 #'   The pessimistic tier saturates wherever canopy stands under a bounded
 #'   span (the lower bound is only ~5 m above ground). Tiers are
 #'   `"grow-in"`, `"fall-in"`, `"no data"` (no risk found, but coverage below
-#'   `min_observed`) and `"none"`. A grow-in or fall-in finding stands even
+#'   `min_observed` or a masked share above `max_masked`) and `"none"`. A grow-in or fall-in finding stands even
 #'   at low coverage, though unseen cells could hide a more severe tier.
 #'   `confidence` is `"measured"` (conductor observed over at least half the
 #'   segment *and* the same tier under both bounds), `"robust"` (same tier
@@ -595,7 +604,8 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
                         phase_offset_m = 3, growth_m = 0, under_line_m = 8,
                         wire_zone_m = 10, clearance_target_m = 4.6, cover_min_m = 2,
                         min_support = 6, structures = NULL, structure_mask_m = 8,
-                        min_encroach_m2 = 5, coverage_m = wire_zone_m, min_observed = 0.75) {
+                        min_encroach_m2 = 5, coverage_m = wire_zone_m, min_observed = 0.75,
+                        max_masked = 0.5) {
   crs <- sf::st_crs(segments)
   m <- crs_m_per_unit(crs)
   lateral_m <- phase_offset_m + clearance_target_m
@@ -611,9 +621,11 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   chm <- terra::ifel(is.na(rasters$chm), 0, rasters$chm)
   if (!is.null(rasters$unobserved)) chm <- terra::mask(chm, rasters$unobserved, maskvalues = TRUE)
   observed <- !is.na(chm) & !is.na(dtm)
+  masked <- terra::setValues(terra::rast(dtm), FALSE)
   if (!is.null(structures) && nrow(structures) > 0) {
     mask <- sf::st_union(sf::st_buffer(sf::st_transform(sf::st_geometry(structures), crs),
                                        structure_mask_m / m))
+    masked <- terra::mask(masked, terra::vect(mask), inverse = TRUE, updatevalue = TRUE)
     # A structure footprint is known, not a data gap, even where its returns
     # were left out of the canopy model as uncertain.
     observed <- terra::mask(observed, terra::vect(mask), inverse = TRUE, updatevalue = TRUE) &
@@ -642,9 +654,9 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   band_m <- max(coverage_m, under_line_m, wire_zone_m)
   band_poly <- terra::vect(sf::st_union(sf::st_buffer(sf::st_geometry(segments), (band_m + 2 * res_of(chm)) / m,
                                                       endCapStyle = "FLAT")))
-  cells <- terra::extract(c(chm, dtm, observed), band_poly, xy = TRUE, cells = TRUE, ID = FALSE)
-  names(cells)[1:3] <- c("h", "ground", "observed")
-  cells <- cells[, c("x", "y", "h", "ground", "observed")]
+  cells <- terra::extract(c(chm, dtm, observed, masked), band_poly, xy = TRUE, cells = TRUE, ID = FALSE)
+  names(cells)[1:4] <- c("h", "ground", "observed", "masked")
+  cells <- cells[, c("x", "y", "h", "ground", "observed", "masked")]
   n_cells_band <- nrow(cells)
   nc <- near(as.matrix(cells[, c("x", "y")]))
   cells$dh <- nc$dh
@@ -653,7 +665,8 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   # its ends), so cells off the data's edge count as unobserved too.
   band <- nc$inside & nc$dh <= max(coverage_m, under_line_m)
   seen <- data.table::data.table(dh = cells$dh[band], seg_id = cells$seg_id[band],
-                                 observed = cells$observed[band] %in% TRUE)
+                                 observed = cells$observed[band] %in% TRUE,
+                                 masked = cells$masked[band] %in% TRUE)
   scored <- cells$observed %in% TRUE & !is.na(cells$h)
   cells <- cells[scored, ]
   nc <- lapply(nc, `[`, scored)
@@ -712,7 +725,9 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
               encroach_lo_m2 = sum(clear_lo < clearance_target_m) * cell_area,
               encroach_hi_m2 = sum(clear_hi < clearance_target_m) * cell_area), by = seg_id]
   cov <- seen[, .(frac_observed = if (any(dh <= coverage_m)) mean(observed[dh <= coverage_m]) else 0,
-                  frac_observed_under = if (any(dh <= under_line_m)) mean(observed[dh <= under_line_m]) else 0),
+                  frac_observed_under = if (any(dh <= under_line_m)) mean(observed[dh <= under_line_m]) else 0,
+                  frac_masked = if (any(dh <= coverage_m)) mean(masked[dh <= coverage_m]) else 0,
+                  frac_masked_under = if (any(dh <= under_line_m)) mean(masked[dh <= under_line_m]) else 0),
               by = seg_id]
   tdt <- data.table::as.data.table(sf::st_drop_geometry(trees))
   ts <- if (nrow(tdt)) tdt[, .(n_strike_lo = sum(strike_lo), n_strike_hi = sum(strike_hi),
@@ -724,7 +739,8 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
   for (part in list(cov, wz, ul, ts)) {
     if (!is.null(part)) seg_stats <- merge(seg_stats, part, by = "seg_id", all.x = TRUE)
   }
-  for (col in c("frac_observed", "frac_observed_under", "encroach_lo_m2", "encroach_hi_m2",
+  for (col in c("frac_observed", "frac_observed_under", "frac_masked", "frac_masked_under",
+                "encroach_lo_m2", "encroach_hi_m2",
                 "n_strike_lo", "n_strike_hi", "n_strike_possible", "n_strike_certain")) {
     if (!col %in% names(seg_stats)) seg_stats[, (col) := 0]
     seg_stats[is.na(get(col)), (col) := 0]
@@ -733,12 +749,13 @@ assess_risk <- function(rasters, profile, segments, tree_ws_m = 5, min_tree_m = 
     if (!col %in% names(seg_stats)) seg_stats[, (col) := NA_real_]
   }
   seg_stats <- as.data.frame(seg_stats)[, c("seg_id", "frac_measured", "frac_observed", "frac_observed_under",
-                                            "wire_zone_cover", "wire_zone_max_h_m", "min_clearance_lo_m",
+                                            "frac_masked", "frac_masked_under", "wire_zone_cover", "wire_zone_max_h_m", "min_clearance_lo_m",
                                             "min_clearance_hi_m", "encroach_lo_m2", "encroach_hi_m2",
                                             "n_strike_lo", "n_strike_hi", "n_strike_possible", "n_strike_certain")]
   out <- merge(segments, seg_stats, by = "seg_id")
   attr(out, "n_cells_band") <- n_cells_band
-  unseen <- out$frac_observed < min_observed | out$frac_observed_under < min_observed
+  unseen <- out$frac_observed < min_observed | out$frac_observed_under < min_observed |
+    out$frac_masked > max_masked | out$frac_masked_under > max_masked
   tier <- function(area, n) {
     t <- ifelse(area >= min_encroach_m2, "grow-in", ifelse(n > 0, "fall-in", "none"))
     ifelse(t == "none" & unseen, "no data", t)

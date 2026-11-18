@@ -455,6 +455,13 @@ test_that("coverage counts structure footprints as observed and ignores cells pa
   expect_equal(open$frac_observed[2], 1, tolerance = 0.01)  # past-the-end cells ignored
   expect_lt(open$frac_observed_under[1], 0.9)              # the gap counts...
   expect_gt(masked$frac_observed_under[1], 0.99)           # ...unless it is a known structure
+  # ...and the share that the mask hides is reported beside it (#59):
+  # an 8 m disc in a 50 m x 16 m zone, plus the cells its edge touches.
+  expect_equal(open$frac_masked_under, c(0, 0))
+  expect_gte(masked$frac_masked_under[1], pi * 8^2 / (50 * 16))
+  expect_lt(masked$frac_masked_under[1], 0.3)
+  expect_equal(masked$frac_masked_under[2], 0)
+  expect_lt(masked$frac_masked[1], masked$frac_masked_under[1])  # the wider band dilutes it
 })
 
 test_that("'no data' under both bounds gets 'low coverage' and is drawn apart on the map", {
@@ -585,4 +592,24 @@ test_that("a disputed crown top makes its cell unobserved, not observed at its l
   new_s <- sf::st_drop_geometry(assess_risk(r, prof, s, tree_ws_m = 3)$segments)
   old_s <- sf::st_drop_geometry(assess_risk(old, prof, s, tree_ws_m = 3)$segments)
   expect_lt(sum(new_s$frac_observed_under), sum(old_s$frac_observed_under))
+})
+
+test_that("a segment mostly under the structure mask is 'no data', not 'none' (#59)", {
+  r <- make_rasters(data.frame(x = x0 + 150.5, y = y0 + 40.5, h = 4))
+  # A row of mapped vertices every 10 m along segment 1, as a minor line
+  # digitised along a road would give: 8 m discs cover the under-line zone.
+  row <- sf::st_sf(geometry = sf::st_sfc(lapply(seq(5, 95, 10), function(dx) sf::st_point(c(x0 + dx, y0))),
+                                         crs = utm))
+  s <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = row)$segments)
+  s <- s[order(s$seg_id), ]
+  expect_gt(s$frac_observed_under[1], 0.99)   # all of it "observed"...
+  expect_gt(s$frac_masked_under[1], 0.9)      # ...and almost none of it scored
+  expect_equal(as.character(s$priority), c("no data", "none"))
+  expect_equal(as.character(s$confidence[1]), "low coverage")
+  # A real finding still stands, and the threshold can be lifted.
+  lifted <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = row, max_masked = 1)$segments)
+  expect_equal(as.character(lifted$priority[lifted$seg_id == 1]), "none")
+  one <- row[1, ]
+  s1 <- sf::st_drop_geometry(risk_for(r, tree_ws_m = 3, structures = one)$segments)
+  expect_equal(as.character(s1$priority[s1$seg_id == 1]), "none")   # one pole hides ~1/8 of the zone
 })
