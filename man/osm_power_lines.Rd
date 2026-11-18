@@ -8,7 +8,8 @@ osm_power_lines(
   aoi = NULL,
   ids = NULL,
   power = c("line", "minor_line"),
-  overpass_url = "https://overpass-api.de/api/interpreter"
+  overpass_url = "https://overpass-api.de/api/interpreter",
+  date = NULL
 )
 }
 \arguments{
@@ -23,6 +24,11 @@ would otherwise be taught to the classifier as vegetation. Underground
 \code{cable} is deliberately left out. Ignored when \code{ids} is given.}
 
 \item{overpass_url}{Overpass endpoint.}
+
+\item{date}{Optional OSM snapshot to query, as \code{"YYYY-MM-DDThh:mm:ssZ"}:
+an Overpass attic query (\verb{[date:...]}) answers from the map as it was
+then, so a rerun months later fetches the same geometry. \code{NULL}
+queries the current map.}
 }
 \value{
 An \code{sf} LINESTRING data frame (EPSG:4326) with \code{osm_id}, \code{name},

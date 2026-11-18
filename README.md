@@ -44,7 +44,7 @@
 
 ```bash
 Rscript analysis/run_sunshine_canyon.R   # ~0.6 GB of 3DEP LiDAR on first run
-Rscript analysis/run_nashville.R         # ~0.3 GB; scores the Colorado model here too
+Rscript analysis/run_nashville.R         # ~0.3 GB; scores the Colorado model, so run Sunshine first
 Rscript -e 'devtools::test()'           # synthetic geometry + lidR example data, no network
 ```
 

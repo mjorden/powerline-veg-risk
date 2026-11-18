@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "kind": "osm_structures",
+  "key": "62ae85951e6b03dd",
+  "request": "{\"args\":{\"aoi\":{\"xmax\":-86.978112,\"xmin\":-86.982486,\"ymax\":36.055292,\"ymin\":36.035536},\"date\":\"2026-10-19T14:01:07Z\"},\"kind\":\"osm_structures\",\"upstream\":null}",
+  "args": {
+    "aoi": {
+      "xmin": -86.982486,
+      "ymin": 36.035536,
+      "xmax": -86.978112,
+      "ymax": 36.055292
+    },
+    "date": "2026-10-19T14:01:07Z"
+  },
+  "upstream": null,
+  "fetched_at": "2026-11-06T22:09:07Z",
+  "vegrisk_version": "0.1.0",
+  "file": {
+    "file": "osm_structures-62ae85951e6b03dd.geojson",
+    "bytes": 6458,
+    "md5": "7d995a6a229930026ed854477fad1b14"
+  },
+  "n": 31,
+  "source": {
+    "osm_timestamp": "2026-11-06T22:08:06Z",
+    "osm_date": "2026-10-19T14:01:07Z",
+    "query": "[out:json][timeout:90][date:\"2026-10-19T14:01:07Z\"];node[\"power\"~\"^(tower|pole)$\"](36.035536,-86.982486,36.055292,-86.978112);out;"
+  }
+}

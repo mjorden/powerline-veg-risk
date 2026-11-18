@@ -85,6 +85,13 @@ reference:
       - nws_forecast
       - nws_alerts
       - forecast_watchlist
+  - title: Caches and model reuse
+    contents:
+      - cache_key
+      - cache_get
+      - cache_policy
+      - training_fingerprint
+      - fingerprint_diff
   - title: Figures
     contents:
       - starts_with("plot_")

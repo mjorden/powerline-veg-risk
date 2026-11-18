@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "kind": "osm_buildings",
+  "key": "98b399590b430d48",
+  "request": "{\"args\":{\"aoi\":{\"xmax\":-105.315722,\"xmin\":-105.328786,\"ymax\":40.02478,\"ymin\":40.012573},\"date\":\"2026-10-19T14:01:07Z\"},\"kind\":\"osm_buildings\",\"upstream\":null}",
+  "args": {
+    "aoi": {
+      "xmin": -105.328786,
+      "ymin": 40.012573,
+      "xmax": -105.315722,
+      "ymax": 40.02478
+    },
+    "date": "2026-10-19T14:01:07Z"
+  },
+  "upstream": null,
+  "fetched_at": "2026-11-06T21:53:45Z",
+  "vegrisk_version": "0.1.0",
+  "file": {
+    "file": "osm_buildings-98b399590b430d48.geojson",
+    "bytes": 10791,
+    "md5": "6d6bc062916aad7206029fca3ae87174"
+  },
+  "n": 33,
+  "source": {
+    "osm_timestamp": "2026-11-06T21:51:48Z",
+    "osm_date": "2026-10-19T14:01:07Z",
+    "query": "[out:json][timeout:90][date:\"2026-10-19T14:01:07Z\"];way[\"building\"](40.012573,-105.328786,40.024780,-105.315722);out geom;"
+  }
+}

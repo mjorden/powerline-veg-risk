@@ -47,7 +47,7 @@ Rewritten after the October 2026 review. The target is RFC 0001's twin for a Col
 7. **Stable keys** (D2, B11, #53): trees keyed on a canonical-CRS position (NAD83(2011) / UTM 13N, EPSG:6342, rounded to 0.5 m) with an epoch-matching table; lines numbered by input order; chainage measured along the OSM way, not the clipped window.
 8. **Versioned, append-only outputs** (D4, C2, C3, #54): GeoParquet partitioned by `run_id`, every row with `valid_from`, `valid_to`, `recorded_at`, `superseded_at`, `source`, `method_version`; a `runs` table; "current state" as a view; readers refuse a run with no manifest.
 9. **The run manifest** (C1, C5, C6, C13, #54): configuration and every resolved parameter, inputs with checksums and snapshot dates (Overpass `[date:]` pinning), the software environment (`renv.lock`, GDAL/GEOS/PROJ versions, thread counts, a dirty-tree check), captured warnings, and a completion status. The field list is in RFC 0002 Part 3.
-10. **Content-addressed caches** (B4, C4, C7, #56): every cache keyed by a hash of its request and upstream inputs, with the recorded arguments compared on load; model reuse gated on a training fingerprint.
+10. **Content-addressed caches** (B4, C4, C7, #56; done): every cache is keyed by a hash of its request, with a sidecar that is required on load and compared with the request being made; the OSM queries are pinned to a snapshot date; model reuse is gated on a training fingerprint (labelled points, parameters, tile checksums, package version) and the vendor evaluation on the model and transfer-model checksums.
 
 ### Stage 2: spans, structures and a territory-sized runner (Phase 1; months)
 

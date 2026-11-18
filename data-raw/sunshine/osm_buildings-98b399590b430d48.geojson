@@ -1,6 +1,6 @@
 {
 "type": "FeatureCollection",
-"name": "osm_buildings",
+"name": "osm_buildings-98b399590b430d48.geojson",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
 "features": [
 { "type": "Feature", "properties": { "osm_id": "581371751" }, "geometry": { "type": "Polygon", "coordinates": [ [ [ -105.3250173, 40.0129419 ], [ -105.3249706, 40.0125699 ], [ -105.3251788, 40.0125544 ], [ -105.3251906, 40.0126489 ], [ -105.325223, 40.0126465 ], [ -105.3252412, 40.0127931 ], [ -105.325209, 40.0127955 ], [ -105.3252254, 40.0129265 ], [ -105.3250173, 40.0129419 ] ] ] } },
