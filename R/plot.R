@@ -514,7 +514,11 @@ plot_cross_section <- function(las, pred, lines, file = NULL, at = 0.5,
 #' Schemes are offset within each class row so none hides another; colours
 #' are keyed by scheme name (a subset keeps its colours) and unknown schemes
 #' are kept, drawn neutral, with a warning. Average precision below 0.01 is
-#' printed to two significant figures, so 0.004 never reads as 0.00.
+#' printed to two significant figures, so 0.004 never reads as 0.00. When
+#' `metrics` carries the per-fold spread (`ap_fold_*`, `n_folds_scored`), the
+#' subtitle says how many spatial folds stand behind the wire figure and
+#' what range they span, so a pooled number resting on one fold is not read
+#' as five (#63).
 #'
 #' @param metrics `metrics` element of [cv_point_classifier()], optionally
 #'   with extra schemes (e.g. an ablation) stacked in.
@@ -562,6 +566,15 @@ plot_cv <- function(metrics, file = NULL) {
   title <- if (length(a_r) == 1 && length(a_s) == 1) {
     sprintf("Wire average precision %s with random folds, %s with spatial blocks", fmt(a_r), fmt(a_s))
   } else "Cross-validated agreement with weak labels"
+  # How many folds the spatial wire figure rests on, and their range.
+  spread <- metrics[metrics$scheme == "spatial_block" & metrics$class == "wire", ]
+  fold_note <- if (nrow(spread) == 1 && !is.null(spread$n_folds_scored)) {
+    if (spread$n_folds_scored > 0) {
+      sprintf("\nSpatial-block wire average precision by fold: median %s, range %s to %s over %d scored fold%s.",
+              fmt(spread$ap_fold_median), fmt(spread$ap_fold_min), fmt(spread$ap_fold_max),
+              spread$n_folds_scored, if (spread$n_folds_scored == 1) "" else "s")
+    } else "\nNo spatial fold holds enough wire points on both sides to score on its own."
+  } else ""
   # Range rule at the row centre (the points themselves are offset).
   rng <- stats::aggregate(value ~ class + metric, data = long, FUN = range)
   rng <- data.frame(rng[c("class", "metric")], lo = rng$value[, 1], hi = rng$value[, 2],
@@ -584,7 +597,8 @@ plot_cv <- function(metrics, file = NULL) {
                                 expand = ggplot2::expansion(add = 0.3)) +
     ggplot2::labs(title = title,
                   subtitle = paste("Agreement with weak (rule-based) labels, not ground truth, at site prevalence.",
-                                   "\nVertical tick = no-skill average precision (class prevalence)."),
+                                   "\nVertical tick = no-skill average precision (class prevalence).",
+                                   fold_note),
                   x = NULL, y = NULL) +
     theme_vegrisk() +
     ggplot2::theme(panel.grid.major.y = ggplot2::element_blank(),

@@ -151,3 +151,104 @@ test_that("the conductor-return test names its linearity column from k, or abort
                "linearity_k1")
   expect_silent(corridor_rasters(las, pred, profile = prof, envelope_m = 5, linearity = "linearity_k100"))
 })
+
+# A table whose rare class sits in a few blocks along one line, as conductor
+# returns do: 5 x 5 blocks of 100 m, vegetation everywhere, wire in the six
+# blocks of the row y in [200, 300) plus one more.
+clustered_feat <- function(seed = 7) {
+  set.seed(seed)
+  n <- 2500
+  veg <- data.table::data.table(X = runif(n, 0, 500), Y = runif(n, 0, 500), a = stats::rnorm(n, 0), b = stats::runif(n))
+  nw <- c(400, 60, 50, 45, 40, 30)   # one block holds most of it
+  wx <- c(50, 150, 250, 350, 450, 50)
+  wy <- c(250, 250, 250, 250, 250, 350)
+  wire <- data.table::rbindlist(lapply(seq_along(nw), function(i) {
+    data.table::data.table(X = wx[i] + runif(nw[i], -40, 40), Y = wy[i] + runif(nw[i], -40, 40),
+                           a = stats::rnorm(nw[i], 2.5), b = stats::runif(nw[i]))
+  }))
+  feat <- rbind(veg[, label := "vegetation"], wire[, label := "wire"])
+  feat[, `:=`(pid = .I, Z = 0, label = factor(label, levels = label_levels))]
+  # A fifth of the points are unlabelled, as margins and abstentions are.
+  feat[sample(.N, .N / 5), label := NA]
+  attr(feat, "crs") <- utm
+  attr(feat, "k") <- 10L
+  attr(feat, "features") <- c("a", "b")
+  feat
+}
+
+test_that("blocks are dealt to folds by class presence, so a clustered class reaches every fold (#63)", {
+  feat <- clustered_feat()
+  b <- assign_blocks(feat, block_m = 100, n_folds = 5)
+  wire_by_fold <- table(factor(b$fold[b$label %in% "wire"], levels = 1:5))
+  expect_true(all(wire_by_fold > 0))                    # six wire blocks, five folds
+  # Blocks stay whole, and every fold gets its share of them.
+  expect_true(all(tapply(b$fold, b$block, function(x) length(unique(x))) == 1))
+  blocks_by_fold <- table(unique(b[, .(block, fold)])$fold)
+  expect_lte(max(blocks_by_fold) - min(blocks_by_fold), 1)
+  # The biggest wire block is alone among wire blocks in its fold, bar the
+  # sixth, which goes to the fold with the least wire.
+  big <- b[label %in% "wire", .N, by = .(block, fold)][order(-N)]
+  expect_equal(sum(big$fold == big$fold[1]), 1)
+  # Same answer whatever the row order; a different deal without labels.
+  b2 <- assign_blocks(feat[sample(.N)], block_m = 100, n_folds = 5)
+  expect_equal(b2$fold[order(b2$pid)], b$fold[order(b$pid)])
+  r <- assign_blocks(feat, block_m = 100, n_folds = 5, stratify = FALSE)
+  expect_false(identical(r$fold, b$fold))
+  expect_equal(r$fold, assign_blocks(data.table::copy(feat)[, label := NULL], block_m = 100, n_folds = 5)$fold)
+  expect_error(assign_blocks(data.table::copy(feat)[, label := NULL], block_m = 100, stratify = TRUE), "label")
+})
+
+test_that("cross-validation reports each fold and the spread behind a pooled figure (#63)", {
+  b <- assign_blocks(clustered_feat(), block_m = 100, n_folds = 5)
+  cv <- cv_point_classifier(b, n_per_class = 200, num_trees = 30, random = FALSE, min_fold_n = 20)
+  fm <- cv$fold_metrics
+  expect_setequal(names(fm), c("scheme", "fold", "class", "n_train", "n_test", "prevalence", "recall",
+                               "avg_precision", "scored"))
+  expect_equal(nrow(fm), 5 * 2)                         # five folds, two classes present
+  wire <- fm[fm$class == "wire", ]
+  lab <- b[!is.na(label)]
+  expect_equal(wire$n_test, as.integer(table(factor(lab$fold[lab$label == "wire"], levels = 1:5))))
+  expect_equal(wire$n_train + wire$n_test, rep(sum(lab$label == "wire"), 5))
+  expect_true(all(wire$scored))
+  m <- cv$metrics[cv$metrics$class == "wire", ]
+  expect_equal(m$n_folds_scored, 5)
+  expect_equal(m$ap_fold_min, min(wire$avg_precision))
+  expect_equal(m$ap_fold_median, stats::median(wire$avg_precision))
+  expect_equal(m$ap_fold_max, max(wire$avg_precision))
+  expect_lte(m$ap_fold_min, m$ap_fold_max)
+
+  # A fold with too few points of a class on either side is reported but
+  # does not count towards the spread.
+  strict <- cv_point_classifier(b, n_per_class = 200, num_trees = 30, random = FALSE, min_fold_n = 100)
+  sw <- strict$fold_metrics[strict$fold_metrics$class == "wire", ]
+  expect_equal(sw$scored, sw$n_test >= 100 & sw$n_train >= 100)
+  expect_lt(sum(sw$scored), 5)
+  expect_equal(strict$metrics$n_folds_scored[strict$metrics$class == "wire"], sum(sw$scored))
+  none <- cv_point_classifier(b, n_per_class = 200, num_trees = 30, random = FALSE, min_fold_n = 1e6)
+  expect_true(all(none$metrics$n_folds_scored == 0))
+  expect_true(all(is.na(none$metrics$ap_fold_median)))
+  # The pooled figures do not depend on the threshold.
+  expect_equal(strict$metrics$avg_precision, cv$metrics$avg_precision)
+})
+
+test_that("out-of-fold predictions cover every point, labelled or not, in the table's order (#63)", {
+  b <- assign_blocks(clustered_feat(), block_m = 100, n_folds = 5)
+  cv <- cv_point_classifier(b, n_per_class = 200, num_trees = 30, random = FALSE, oof = TRUE)
+  expect_equal(nrow(cv$oof), nrow(b))
+  expect_equal(cv$oof$fold, b$fold)
+  expect_false(anyNA(cv$oof$pred))
+  expect_true(all(cv$oof$p_wire_raw >= 0 & cv$oof$p_wire_raw <= 1))
+  expect_gt(sum(is.na(b$label)), 0)                     # unlabelled points got one too
+  # Each point is scored by the model that never saw its block: refitting
+  # fold 2's model by hand reproduces its rows.
+  lab <- stable_order(b[!is.na(label)])
+  fit2 <- train_point_classifier(lab[fold != 2], 200, 30, NULL, NULL, 1 + 2)
+  rows <- which(b$fold == 2)
+  expect_equal(cv$oof$p_wire_raw[rows], raw_probs(fit2, b[rows])[, "wire"])
+  # Row order does not change a point's prediction.
+  sh <- b[sample(.N)]
+  cv2 <- cv_point_classifier(sh, n_per_class = 200, num_trees = 30, random = FALSE, oof = TRUE)
+  expect_equal(cv2$oof$pred[order(sh$pid)], cv$oof$pred[order(b$pid)])
+  # Without oof = TRUE nothing is returned (or computed).
+  expect_null(cv_point_classifier(b, n_per_class = 200, num_trees = 30, random = FALSE)$oof)
+})

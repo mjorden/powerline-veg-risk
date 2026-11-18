@@ -260,37 +260,44 @@ run_case_study_impl <- function(cfg, ctx) {
     }
     model <- fit$model
     cv <- fit$cv
+    if (is.null(cv$oof)) stop(fit_path, " has no out-of-fold predictions (#63); run once without VEGRISK_REUSE.",
+                              call. = FALSE)
     metrics <- cv$metrics
     cv_summary <- cv$summary
+    fold_metrics <- cv$fold_metrics
     reused_from <- list(run_id = fit$run_id, fitted_at = fit$fitted_at,
                         model_md5 = unname(tools::md5sum(fit_path)))
     ctx$reused_from <- reused_from
     step("reusing model and cross-validation from run ", fit$run_id)
   } else {
-    cv <- cv_point_classifier(feat)
-    ablation <- cv_point_classifier(feat, drop_features = rule_proxy_features)
-    ablation$metrics <- ablation$metrics[ablation$metrics$scheme == "spatial_block", ]
-    ablation$metrics$scheme <- "spatial_ablation"
-    ablation$summary <- ablation$summary[ablation$summary$scheme == "spatial_block", ]
-    ablation$summary$scheme <- "spatial_ablation"
-    metrics <- rbind(cv$metrics, ablation$metrics)
-    cv_summary <- rbind(cv$summary, ablation$summary)
+    # oof: every point classified by the fold model that never saw its
+    # block, for the vendor comparison below (#63).
+    cv <- cv_point_classifier(feat, oof = TRUE)
+    ablation <- cv_point_classifier(feat, drop_features = rule_proxy_features, random = FALSE)
+    as_ablation <- function(x) { x$scheme <- "spatial_ablation"; x }
+    metrics <- rbind(cv$metrics, as_ablation(ablation$metrics))
+    cv_summary <- rbind(cv$summary, as_ablation(ablation$summary))
+    fold_metrics <- rbind(cv$fold_metrics, as_ablation(ablation$fold_metrics))
     step("cross-validation done")
     model <- train_point_classifier(feat)
     fit <- list(run_id = run_id, fitted_at = t0, git_sha = git_sha(), model = model,
                 fingerprint = fingerprint,
-                cv = list(metrics = metrics, summary = cv_summary,
-                          confusion = cv$confusion, fold_counts = cv$fold_counts))
+                cv = list(metrics = metrics, summary = cv_summary, fold_metrics = fold_metrics,
+                          confusion = cv$confusion, fold_counts = cv$fold_counts, oof = cv$oof))
     save_rds(fit, fit_path)
     reused_from <- NULL
   }
   print(metrics, digits = 3)
   print(cv_summary, digits = 3)
+  step("per-fold average precision (spatial blocks); a fold is scored with >= 20 points of the class on both sides:")
+  print(fold_metrics[fold_metrics$scheme == "spatial_block", ], digits = 3, row.names = FALSE)
   ctx$inputs$model <- c(file_record(fit_path), list(fitted_run_id = fit$run_id))
   fwrite(stamp(metrics), file.path(run_dir, "cv_metrics.csv"), eol = "\n")
   record_output(file.path(run_dir, "cv_metrics.csv"), metrics)
   fwrite(stamp(cv_summary), file.path(run_dir, "cv_summary.csv"), eol = "\n")
   record_output(file.path(run_dir, "cv_summary.csv"), cv_summary)
+  fwrite(stamp(fold_metrics), file.path(run_dir, "cv_folds.csv"), eol = "\n")
+  record_output(file.path(run_dir, "cv_folds.csv"), fold_metrics)
   pred <- predict_points(model, feat)
   print(table(predicted = pred$pred, weak_label = pred$label, useNA = "ifany"))
 
@@ -387,12 +394,20 @@ run_case_study_impl <- function(cfg, ctx) {
       wire_recall = mean(lab[feat$label %in% "wire"] == "wire"),
       wire_ap = avg_precision(p, feat$label %in% "wire"),
       wire_prevalence = mean(feat$label %in% "wire"))
+    # The model row is scored out of fold: each point by the spatial-CV
+    # model that never saw its block, like the vendor-supervised reference
+    # below. The final model scored on its own training points is kept as
+    # `model_in_sample` for comparison only (#63).
+    oof <- cv$oof
     vendor <- list(
       conductor_zone_vendor_class = table(cut_vc(vc[conductor_zone])),
       rule_wire_vendor_class = table(cut_vc(vc[feat$label %in% "wire"])),
       weak  = evaluate_vendor_classes(feat$label[sc], vc[sc]),
-      model = evaluate_vendor_classes(pred$pred[sc], vc[sc]),
-      model_wire = wire_skill(pred$pred, raw_wire(model))
+      model = evaluate_vendor_classes(oof$pred[sc], vc[sc]),
+      model_wire = wire_skill(oof$pred, oof$p_wire_raw),
+      model_scoring = "out of fold (spatial blocks)",
+      model_in_sample = evaluate_vendor_classes(pred$pred[sc], vc[sc]),
+      model_in_sample_wire = wire_skill(pred$pred, raw_wire(model))
     )
     if (!is.null(transfer_path)) {
       path <- transfer_path
@@ -432,8 +447,11 @@ run_case_study_impl <- function(cfg, ctx) {
       print(vendor[[nm]]$metrics, digits = 3)
       print(vendor[[nm]]$summary, digits = 3)
     }
-    step("wire skill (rule labels): model / transfer")
-    print(rbind(model = vendor$model_wire, transfer = vendor$transfer_wire), digits = 3)
+    step("wire skill (rule labels): model out of fold / model in sample / transfer")
+    print(rbind(model = vendor$model_wire, in_sample = vendor$model_in_sample_wire,
+                transfer = vendor$transfer_wire), digits = 3)
+    step("vs vendor, the final model on its own training points (in sample, for comparison):")
+    print(vendor$model_in_sample$summary, digits = 3)
     step("vendor-supervised reference (spatial CV):")
     print(vendor$reference, digits = 3)
     print(vendor$reference_summary, digits = 3)
@@ -651,7 +669,7 @@ run_case_study_impl <- function(cfg, ctx) {
                   lidar = list(project = cfg$project, tiles = tiles_info,
                                gps_time_type = vintage$gps_time_type, n_timed = vintage$n,
                                flight_from = vintage$from, flight_median = vintage$median, flight_to = vintage$to),
-                  metrics = metrics, cv_summary = cv_summary,
+                  metrics = metrics, cv_summary = cv_summary, fold_metrics = fold_metrics,
                   confusion = cv$confusion, fold_counts = cv$fold_counts,
                   importance = model$variable.importance, vendor = vendor,
                   vendor_screens = vendor_screens,

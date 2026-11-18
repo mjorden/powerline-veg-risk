@@ -4,7 +4,14 @@
 \alias{assign_blocks}
 \title{Assign points to spatial blocks and CV folds}
 \usage{
-assign_blocks(feat, crs = NULL, block_m = 100, n_folds = 5, seed = 1)
+assign_blocks(
+  feat,
+  crs = NULL,
+  block_m = 100,
+  n_folds = 5,
+  seed = 1,
+  stratify = NULL
+)
 }
 \arguments{
 \item{feat}{A features table with \code{X}, \code{Y}.}
@@ -17,6 +24,10 @@ assign_blocks(feat, crs = NULL, block_m = 100, n_folds = 5, seed = 1)
 \item{n_folds}{Number of folds.}
 
 \item{seed}{RNG seed for fold assignment.}
+
+\item{stratify}{Deal blocks to folds by class presence (see above).
+Defaults to \code{TRUE} when \code{feat} has a \code{label} column with more than one
+class; \code{FALSE} gives the purely random deal.}
 }
 \value{
 \code{feat} with integer columns \code{block} and \code{fold}. Block ids are
@@ -24,5 +35,14 @@ numbered by position (west to east, then south to north), so they do
 not depend on row order.
 }
 \description{
-Assign points to spatial blocks and CV folds
+With labels on the table, blocks are dealt to folds class by class,
+rarest class first: the blocks that hold a class are taken largest first
+and each goes to the fold that so far has the fewest points of that
+class. A rare class that sits in a handful of blocks (conductor returns
+along one stretch of line) is then spread over as many folds as it has
+blocks, instead of landing wherever a shuffle puts it; a purely random
+deal once left 76\% of a site's wire points in one fold and none in
+another (#63). Blocks that hold only the commonest class are dealt at
+random, keeping the folds' block counts level. Blocks stay whole, so
+this does not leak neighbours between folds.
 }

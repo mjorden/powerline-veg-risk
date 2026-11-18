@@ -12,7 +12,9 @@ cv_point_classifier(
   drop_features = NULL,
   eval_veg_frac = 0.1,
   random = TRUE,
-  seed = 1
+  seed = 1,
+  min_fold_n = 20,
+  oof = FALSE
 )
 }
 \arguments{
@@ -29,14 +31,30 @@ cv_point_classifier(
 \item{random}{Also run random k-fold CV for comparison.}
 
 \item{seed}{RNG seed.}
+
+\item{min_fold_n}{A fold counts towards a class's spread only with at
+least this many points of the class in training and held out.}
+
+\item{oof}{Also return the spatial out-of-fold prediction of \emph{every} row
+of \code{feat}, labelled or not: each point is classified by the model that
+never saw its block. That is the prediction to score against an
+independent reference; scoring the final model on the points it was
+trained on is in-sample.}
 }
 \value{
 A list with \code{metrics} (one row per scheme and class: \code{n}
 estimated held-out points, \code{prevalence}, \code{precision}, \code{recall}, \code{f1},
-\code{avg_precision}), \code{summary} (one row per scheme: \code{balanced_accuracy},
-\code{n_eval}), \code{confusion} (spatial-CV confusion matrix in estimated point
-counts, rows = weak label, columns = prediction) and \code{fold_counts}
-(labelled points per spatial fold).
+\code{avg_precision}, all pooled over folds, then \code{n_folds_scored},
+\code{ap_fold_min}, \code{ap_fold_median}, \code{ap_fold_max}), \code{fold_metrics} (one
+row per scheme, fold and class: \code{n_train}, \code{n_test}, \code{prevalence},
+\code{recall}, \code{avg_precision}, \code{scored}; a class absent from a fold's
+held-out points has \code{n_test = 0}), \code{summary} (one row per scheme:
+\code{balanced_accuracy}, \code{n_eval}), \code{confusion} (spatial-CV confusion
+matrix in estimated point counts, rows = weak label, columns =
+prediction), \code{fold_counts} (labelled points per spatial fold) and, with
+\code{oof = TRUE}, \code{oof} (a data frame in the row order of \code{feat}: \code{fold},
+\code{pred}, and \code{p_wire_raw}, the forest's wire probability before the
+prior correction).
 }
 \description{
 Every held-out non-vegetation point is scored; vegetation is scored on a
@@ -45,4 +63,15 @@ is estimated at the site's real class prevalence. Two threshold-free
 summaries are added: per-class average precision (area under the
 precision-recall curve; compare it with \code{prevalence}, its no-skill value)
 and balanced accuracy (mean per-class recall of the argmax decision).
+}
+\details{
+The pooled figures put the held-out points of every fold in one table,
+although each fold was scored by its own model. A rare class can sit
+almost entirely in one fold, and the pooled average precision is then
+that fold's result with the others as noise. \code{fold_metrics} reports each
+fold on its own, and \code{metrics} carries the spread (\code{ap_fold_min},
+\code{ap_fold_median}, \code{ap_fold_max}) over the folds that hold at least
+\code{min_fold_n} points of the class on both the training and the held-out
+side (\code{n_folds_scored}). Read a pooled figure together with its spread
+and with how many folds stand behind it (#63).
 }

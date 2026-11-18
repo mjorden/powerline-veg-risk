@@ -83,3 +83,19 @@ test_that("midmod risk map draws zero encroachment as absence, not risk (#5)", {
   expect_false(any(unlist(lapply(b$data, `[[`, "colour")) %in% pal$encroach))
   expect_match(p$labels$subtitle, "No canopy in the clearance envelope")
 })
+
+test_that("plot_cv says how many folds stand behind the spatial wire figure (#63)", {
+  skip_if_not_installed("ggplot2")
+  m <- data.frame(scheme = rep(c("spatial_block", "random"), each = 2), class = rep(c("vegetation", "wire"), 2),
+                  n = c(1000, 50, 1000, 50), prevalence = c(0.95, 0.05, 0.95, 0.05),
+                  precision = 0.9, recall = 0.8, f1 = 0.85, avg_precision = c(0.99, 0.004, 0.99, 0.2),
+                  n_folds_scored = c(5, 1, 5, 5), ap_fold_min = c(0.98, 0.004, 0.98, 0.15),
+                  ap_fold_median = c(0.99, 0.004, 0.99, 0.2), ap_fold_max = c(1, 0.004, 1, 0.3))
+  sub <- plot_cv(m)$labels$subtitle
+  expect_match(sub, "over 1 scored fold.", fixed = TRUE)
+  expect_match(sub, "median 0.004", fixed = TRUE)
+  m$n_folds_scored[2] <- 0
+  expect_match(plot_cv(m)$labels$subtitle, "No spatial fold holds enough wire points", fixed = TRUE)
+  # Metrics from before the spread existed draw as they did.
+  expect_false(grepl("fold", plot_cv(m[, 1:8])$labels$subtitle))
+})

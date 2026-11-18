@@ -16,5 +16,9 @@ with extra schemes (e.g. an ablation) stacked in.}
 Schemes are offset within each class row so none hides another; colours
 are keyed by scheme name (a subset keeps its colours) and unknown schemes
 are kept, drawn neutral, with a warning. Average precision below 0.01 is
-printed to two significant figures, so 0.004 never reads as 0.00.
+printed to two significant figures, so 0.004 never reads as 0.00. When
+\code{metrics} carries the per-fold spread (\verb{ap_fold_*}, \code{n_folds_scored}), the
+subtitle says how many spatial folds stand behind the wire figure and
+what range they span, so a pooled number resting on one fold is not read
+as five (#63).
 }
